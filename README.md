@@ -91,13 +91,9 @@ All shader files referenced (`td.rota.jxs`, `cc.scalebias.jxs`, `co.chromakey.hs
 patches/
   Feedbax v123.maxpat          ← main patch (Max 9, Oct 2025)
   variants/
-    Feedbax v116 iPad UI.maxpat       ← enhanced Mira/iPad controls (Max 8, Aug 2025)
-    Feedbax v119 Langton.maxpat       ← cellular automata variant (Max 8, Nov 2024)
-    Feedbax v121 Ultrawide.maxpat     ← ultrawide monitor support (Max 8, Jan 2025)
-    Feedbax v116 CAS Fork.maxpat      ← CAS collaboration fork (Max 8, May 2025)
-    Feedbax v122 CAS Images.maxpat    ← CAS with image features (Max 8, Apr 2025)
+    Feedbax v121 Ultrawide.maxpat     ← multi-monitor/ultrawide support with oversampling (Max 8, Jan 2025)
     Synesthesia Analog 2.0 Mira.maxpat ← related instrument (Max 8, Dec 2024)
-    Video2Sound.maxpat                 ← utility patch (Max 8, Dec 2024)
+    Video2Sound.maxpat                 ← video-to-MIDI converter utility (Max 8, Dec 2024)
 assets/
   NormalFullAlpha1080p1.png    ← full-frame opaque alpha mask (loaded on startup)
   circleGradiant1080p6.png     ← circular gradient alpha mask (vignette effect)
@@ -105,7 +101,7 @@ docs/
   *.png                        ← screenshots of each subpatcher for reference
 ```
 
-The variant patches were saved in Max 8.6.x but should open in Max 9. They represent different feature branches that Sean maintained in parallel — the v123 "DeployabilityCleanup" is the canonical, streamlined build.
+The Ultrawide variant adds multi-monitor resolution presets (e.g. 6400×1800 for dual ultrawides), oversampling controls, and dual-screen screenshot capture. The other variant patches were saved in Max 8.6.x but should open in Max 9.
 
 ### Asset Setup
 
