@@ -23,7 +23,7 @@ Sean Stevens died of cancer on March 9, 2026.
 
 ### Running It
 
-1. Open `patches/Feedbax v123.maxpat` in Max 9.
+1. Open `patches/Feedbax.maxpat` in Max 9.
 2. The patch opens with a small preview window (320×180). To go fullscreen or change resolution, use the resolution presets in the patch (options from 1280×720 up to 7680×4320, including 3840×2160 for 4K monitors).
 3. Click the toggle at the top to start the metro (frame clock). You should see the render window appear.
 4. In the `p picsVid` subpatcher, enable a camera input (USB or NDI) or load an image/video file.
@@ -89,19 +89,18 @@ All shader files referenced (`td.rota.jxs`, `cc.scalebias.jxs`, `co.chromakey.hs
 
 ```
 patches/
-  Feedbax v123.maxpat          ← main patch (Max 9, Oct 2025)
+  Feedbax.maxpat               ← main patch (Max 9)
   variants/
-    Feedbax v121 Ultrawide.maxpat     ← multi-monitor/ultrawide support with oversampling (Max 8, Jan 2025)
-    Synesthesia Analog 2.0 Mira.maxpat ← related instrument (Max 8, Dec 2024)
-    Video2Sound.maxpat                 ← video-to-MIDI converter utility (Max 8, Dec 2024)
+    Feedbax Ultrawide.maxpat   ← multi-monitor/ultrawide support with oversampling (Max 8)
 assets/
   NormalFullAlpha1080p1.png    ← full-frame opaque alpha mask (loaded on startup)
   circleGradiant1080p6.png     ← circular gradient alpha mask (vignette effect)
 docs/
   *.png                        ← screenshots of each subpatcher for reference
+version.txt                    ← current version identifier
 ```
 
-The Ultrawide variant adds multi-monitor resolution presets (e.g. 6400×1800 for dual ultrawides), oversampling controls, and dual-screen screenshot capture. The other variant patches were saved in Max 8.6.x but should open in Max 9.
+The Ultrawide variant adds multi-monitor resolution presets (e.g. 6400×1800 for dual ultrawides), oversampling controls, and dual-screen screenshot capture. It was saved in Max 8.6.x but should open in Max 9.
 
 ### Asset Setup
 
