@@ -6,7 +6,7 @@ Feedbax is a live visual performance tool built in [Max](https://cycling74.com/p
 
 Sean developed Feedbax over roughly 15 years (2009–2025), using it for live performances, installations, and projected visual art. This repository contains the monitor/display-focused version of the instrument, cleaned up for portability. Earlier versions of Feedbax also drove LED arrays via Open Pixel Control; those components are not included here.
 
-Sean Stevens died of cancer on March 9, 2026.
+Sean Stevens passed on March 9, 2026.
 
 ## Getting Started
 
