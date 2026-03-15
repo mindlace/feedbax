@@ -118,7 +118,7 @@ Feedbax evolved through several generations:
 
 ## License
 
-[Choose a license — MIT, GPL, or Creative Commons are common choices for artistic software]
+[MIT](LICENSE)
 
 ## Credits
 

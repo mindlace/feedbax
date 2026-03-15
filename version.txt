@@ -1,1 +1,1 @@
-v123 (DeployabilityCleanup, October 2025)
+1.2.3
