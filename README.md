@@ -122,6 +122,6 @@ Feedbax evolved through several generations:
 
 ## Credits
 
-Created by **Sean Stevens** of Recollective / Sustainable Magic.
+Created by [Sean Stevens](https://seanstevens.com).
 
-Open-sourced posthumously by Ethan Jucovy.
+Open-sourced posthumously by Ethan Fremen.
