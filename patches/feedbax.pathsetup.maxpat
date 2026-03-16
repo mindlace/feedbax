@@ -97,7 +97,7 @@
 			},
 			{
 				"box": {
-					"comment": "Strip trailing two directories (patches/lib/) to get project root",
+					"comment": "Strip trailing directory (patches/) to get project root",
 					"id": "obj-5",
 					"maxclass": "newobj",
 					"numinlets": 1,
@@ -115,7 +115,7 @@
 						280.0,
 						22.0
 					],
-					"text": "regexp (.+[\\\\/]).+[\\\\/].+[\\\\/]$ @substitute %1"
+					"text": "regexp (.+[\\\\/]).+[\\\\/]$ @substitute %1"
 				}
 			},
 			{
