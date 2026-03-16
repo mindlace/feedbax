@@ -2,3 +2,11 @@
 *.pxd
 *.pxd.sb-*
 Thumbs.db
+.superpowers
+.claude/worktrees/
+
+# User media content (keep directories via .gitkeep)
+input/transparent-background/*
+!input/transparent-background/.gitkeep
+output/*
+!output/.gitkeep
