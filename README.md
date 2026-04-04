@@ -95,6 +95,9 @@ patches/
 assets/
   NormalFullAlpha1080p1.png    ← full-frame opaque alpha mask (loaded on startup)
   circleGradiant1080p6.png     ← circular gradient alpha mask (vignette effect)
+input/
+  transparent-background/      ← put your sticker/overlay images here (organized in subdirectories as you like)
+output/                        ← screenshots save here
 docs/
   *.png                        ← screenshots of each subpatcher for reference
 version.txt                    ← current version identifier
@@ -102,9 +105,13 @@ version.txt                    ← current version identifier
 
 The Ultrawide variant adds multi-monitor resolution presets (e.g. 6400×1800 for dual ultrawides), oversampling controls, and dual-screen screenshot capture. It was saved in Max 8.6.x but should open in Max 9.
 
-### Asset Setup
+### Media Setup
 
-The main patch expects the alpha mask images to be findable by Max's search path. The simplest approach: in Max, go to Options → File Preferences and add the `assets/` folder to the search path. Alternatively, copy the two PNG files into the same directory as the patch.
+**Sticker images**: Place your transparent-background images (PNGs with alpha channels) in `input/transparent-background/`. You can organize them in subdirectories — the patch scans recursively. On load, the patch automatically resolves its own location and finds the `input/` directory relative to the project root.
+
+**Alpha masks**: The main patch expects the alpha mask images in `assets/` to be findable by Max's search path. The simplest approach: in Max, go to Options → File Preferences and add the `assets/` folder to the search path. Alternatively, copy the two PNG files into the same directory as the patch.
+
+**Screenshots**: Captured screenshots save to the `output/` directory in the project root.
 
 ## History
 
