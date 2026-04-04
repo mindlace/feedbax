@@ -10,3 +10,8 @@ input/transparent-background/*
 !input/transparent-background/.gitkeep
 output/*
 !output/.gitkeep
+
+# Admin Python
+admin/.venv/
+__pycache__/
+*.pyc
