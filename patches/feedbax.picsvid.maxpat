@@ -10187,7 +10187,7 @@
 						476.0,
 						22.0
 					],
-					"text": "jit.gl.layer foo @layer 2 @enable 0 @shadow_caster 0 @two_sided 0 @auto_material 0"
+					"text": "jit.gl.layer fb @layer 2 @enable 0 @shadow_caster 0 @two_sided 0 @auto_material 0 @automatic 1"
 				}
 			},
 			{

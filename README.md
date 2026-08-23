@@ -13,7 +13,7 @@ Sean Stevens passed on March 9, 2026.
 ### Requirements
 
 - **Max 8.6.5 or Max 9** (the patch was saved in Max 9.0.7 and opens in Max 8.6.5). Download from [cycling74.com](https://cycling74.com/downloads). Max can open and run patches in its free mode without a license.
-  **Status (Aug 2026):** the patch loads and renders, but the feedback capture it uses (`usetexture`/`to_texture`) is a legacy Jitter mechanism that is a silent no-op on the modern `gl3` GL engine (Max 8.6 default, Max 9 only option), so the loop does not close on a stock install. Sean ran Max 8 with the legacy `gl2` engine. See [docs/diagnosis-2026-08-23.md](docs/diagnosis-2026-08-23.md) for the evidence, what has been fixed, and the planned `jit.gl.node` retrofit.
+  **Status (Aug 2026):** the feedback loop now runs on Max 9. The original capture used the legacy `usetexture`/`to_texture` messages, which are silent no-ops on the modern `glcore`/`gl3` GL engine (Max 8.6 default, Max 9's only engine), so the loop never closed on a stock install — this is why it "worked for Sean" (who ran Max 8 with the legacy `gl2` engine) but not for others. The capture has been retrofitted to `jit.gl.node @capture 1` and validated on Max 9.1.5 (the loop closes and recirculates through the shader chain, at ~60 fps with no errors). See [docs/diagnosis-2026-08-23.md](docs/diagnosis-2026-08-23.md) for the full evidence, the exact edits, and the remaining fidelity follow-ups (trail-fade tuning).
 - **A camera** — any USB webcam will work. NDI network camera input is also supported.
 - **A microphone or audio input** — Feedbax is audio-reactive. The built-in mic works, or use a line-in / audio interface.
 

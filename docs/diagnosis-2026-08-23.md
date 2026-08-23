@@ -14,6 +14,12 @@ and by opening the patches in **Max 8.6.5 on this machine** (Apple Silicon, nati
 "runtime" mode, default `gl3` engine) with probe patches that print to the Max Console. Max 9 was
 not available to test.
 
+> **Update 2026-08-23 (later the same day): Max 9.1.5 is now installed, and the capture retrofit
+> (finding G) has been built and validated — the feedback loop runs on Max 9's `glcore` engine.**
+> See the new section [Max 9 retrofit — built and validated](#max-9-retrofit--built-and-validated)
+> at the end of this document. The summary row for G, "What was changed", and "What's left" below
+> have been updated accordingly.
+
 ## Summary
 
 | # | finding | status |
@@ -24,7 +30,7 @@ not available to test.
 | D | `loadbang → "folder input/transparent-background/"` (relative path) in picsVid → `umenu` error "not a folder". | **fixed** (buttons now re-trigger pathsetup) |
 | E | `importmovie NormalFullAlpha1080p1.png` fails unless `assets/` is on Max's search path (README told users to add it by hand). | **fixed**: pathsetup now appends `<root>/assets` to the search path at load |
 | F | On a fresh load the feedback path is **closed**: `[switch 2]` that gates the captured texture into `shaderfx` starts closed, and `usetexture fst/dst` is only sent when the FS toggle changes. Sean's ritual included toggling fullscreen. | **fixed** (`loadmess 0` → FS toggle), effect verified |
-| G | **Root cause of "the feedback loop doesn't run"**: the capture uses the legacy `usetexture`/`to_texture` messages, which are silent no-ops under the `gl3`/"glcore" engine (Max 8.6 default, Max 9 only option). Max prints `copy_texture is obsolete when using the glcore engine` for the attribute form; the message form prints nothing. **Sean's Max 8 preferences use the legacy `gl2` engine.** | verified; retrofit to `jit.gl.node @capture 1` designed, not yet applied |
+| G | **Root cause of "the feedback loop doesn't run"**: the capture uses the legacy `usetexture`/`to_texture` messages, which are silent no-ops under the `gl3`/"glcore" engine (Max 8.6 default, Max 9 only option). Max prints `copy_texture is obsolete when using the glcore engine` for the attribute form; the message form prints nothing. **Sean's Max 8 preferences use the legacy `gl2` engine.** | verified; **retrofit to `jit.gl.node @capture 1` built and validated on Max 9.1.5 — feedback loop runs.** See [Max 9 retrofit](#max-9-retrofit--built-and-validated) |
 | H | Sean kept performing from Max 8.6.5 builds (`v116jamianXUIipadupgrade`, `v120…`, `v122debuggingisg`, Aug–Sep 2025, with a Finder alias pointing at v116). The Max 9 "DeployabilityCleanup" line (v121–v123, Jun–Oct 2025) was a parallel cleanup that dropped brightness/contrast/saturation from the chain and replaced the manual Leap/iPad switch with an automatic 2-s timer. | verified (archive diffs, `docs/spec/05`) |
 | I | Optional externals absent here: `shell` (StillSave screenshots), `ultraleap` (Leap), `jit.ndi.receive~` (NDI camera). Harmless. | verified |
 
@@ -114,32 +120,106 @@ Max 8.6.5, Preferences → GL Engine = `gl2`, **Open using Rosetta** ticked on M
   pathsetup at load, the others are manual "rescan folder" buttons); their dangling outlet cords and
   the `receive feedbax_as_sticker_folder` box were removed; the `[folder input/…]` object behind
   "drop a folder here!" lost its bogus argument. No change to any signal-path object.
-* `patches/Feedbax.maxpat` — one added object: `loadmess 0` → the FS toggle (finding F).
-* `docs/spec/*`, this file, `tools/*.py`.
+* `patches/Feedbax.maxpat` — the `loadmess 0` → FS toggle (finding F), **plus the finding-G
+  capture retrofit** (see the [Max 9 retrofit](#max-9-retrofit--built-and-validated) section for
+  the exact object/cord edits): a `jit.gl.node foo @name fb @capture 1` and a display
+  `jit.gl.videoplane foo` were added, the main feedback plane was reparented into the node, the
+  shader chain's input was moved from the dead `switch 2` to the node's captured-texture outlet,
+  the obsolete `to_texture`/per-frame plane-bang cords were cut, and the `erasetransparency` and
+  `resolution` buses were re-pointed at the node.
+* `patches/feedbax.picsvid.maxpat` — the image/sticker/camera `jit.gl.layer` reparented into the
+  `fb` capture node (context `foo` → `fb`, `@automatic 1`) so its output is part of the feedback.
+* `patches/feedbax.sound2.maxpat` — the two waveform `jit.gl.graph` objects reparented into `fb`
+  the same way (`@automatic 1`, `@layer 3`).
+* `tools/maxedit.py` — new: surgical, diff-friendly `.maxpat` JSON editor (Max can't save in
+  runtime mode, so fixes are applied to the JSON directly).
+* `docs/spec/*`, this file.
 
-Nothing else in the GL/render path was modified.
+The GL/render path change is exactly the finding-G retrofit above; the legacy `fst`/`dst`
+textures, `switch 2`, `gswitch2` and `usetexture` message boxes were left in place but
+disconnected (vestigial) to keep the diff legible and the lineage against Sean's archive visible.
 
 ## What's left to make it run on a stock Max 8.6 / Max 9 install
 
-1. **Replace the capture** (finding G) with `jit.gl.node`. Design, validated in principle against
-   the Max 8 reference but **not yet built/tested**:
-   * add `jit.gl.node foo @name fb @capture 1 @automatic 0 @dim 1920 1080 @erase_color 0 0 0 1
-     @blend_enable 1 @depth_enable 0`; route the `resolution` bus and the `erase_color` pak to it
-     (the partial-erase trick must happen inside the node — confirm `erase_mode` blend behaviour on
-     `jit.gl.node`);
-   * make the drawers children of the node by renaming their context argument `foo` → `fb`:
-     the main `jit.gl.videoplane` (Feedbax.maxpat), `jit.gl.layer foo` (picsvid), both
-     `jit.gl.graph foo` (sound2); give them `@automatic 1` and `@layer` values that reproduce the
-     manual bang order (image layer 2, waveforms ~3, feedback plane highest);
-   * per frame: `erase` → bang node (draws children into its FBO, emits `jit_gl_texture fb`) →
-     that reference goes where `switch 2`'s output went (`feedbax.shaderfx` inlet) → the plane's
-     texture for the *next* frame; a new `jit.gl.videoplane foo @texture fb` draws the node's
-     output into the window; then bang `jit.gl.render`;
-   * delete/ignore `fst`/`dst`/`switch 2`/`gswitch2`/`usetexture`/`to_texture`.
-   Because the shader slab produces a fresh texture, the plane never samples the FBO it is drawing
-   into. Test first in a 12-object patch (seed circle + rotating plane should spiral), then retrofit.
-2. Optionally re-connect `jit.gl.pix @gen brcosa` (finding H) to match what Sean performed with.
-3. Re-test under Max 9 (not available on this machine).
+1. ~~**Replace the capture** (finding G) with `jit.gl.node`.~~ **Done and validated on Max 9.1.5**
+   — see [Max 9 retrofit — built and validated](#max-9-retrofit--built-and-validated) below.
+2. **Trail-fade parity (fidelity follow-up).** On gl2, `erasetransparency` drove a *blended*
+   framebuffer erase (`framebuffer = mix(old, black, α)`, α∈[0.8,1.0]) that fades the trails. The
+   `jit.gl.node` erase is a *full clear* of its FBO; persistence now comes from the feedback plane
+   redrawing the previous frame (as in the probe). `erasetransparency` is currently routed to the
+   node's `erase_color` alpha, which is the closest analog but does not reproduce the old
+   partial-fade. If the trail length control needs to feel like Sean's, translate it to a
+   brightness multiply `< 1` in the shader chain (e.g. a `cc.brightness`/`cc.scalebias` slab after
+   the HSL stage — the shipped `render/camera.node/camera.direct.feedback.maxpat` uses exactly this
+   with `cc.brightness.ip.jxs @param alpha 1.007`).
+3. **Verify a performer-driven spiral.** The loop is confirmed closed (a temp seed persists and
+   recirculates through the real `shaderfx`), and the identical `td.rota.jxs` loop is confirmed to
+   spiral in isolation (the probe). A full spiral in the real patch needs live control input
+   (`shadeCtl` theta/zoom from webUI/Mira/Leap); this was not force-tested headlessly.
+4. **Optional cleanup.** The now-vestigial `fst`/`dst`/`switch 2`/`gswitch2`/`usetexture`
+   objects were left in place (disconnected). Remove them once the retrofit has been exercised
+   live and confirmed.
+5. Optionally re-connect `jit.gl.pix @gen brcosa` (finding H) to match what Sean performed with.
+
+## Max 9 retrofit — built and validated
+
+Done on **Max 9.1.5** (`glcore` engine; the Console reports `OpenGL Version 4.1 Metal - 90.5,
+GLSL Version 4.10`), Apple-Silicon-native, unlicensed runtime mode. All patch edits were made with
+the new `tools/maxedit.py` (Max can't save in runtime mode).
+
+### The mechanism (proven in isolation first)
+
+A standalone 13-object probe reproduced the loop: `jit.gl.node @name fb @capture 1 @automatic 1`
+captures its children (a seed shape + a feedback plane) into texture `fb`; the node's left outlet
+emits `jit_gl_texture fb`; that feeds `jit.gl.slab foo @file td.rota.jxs` (theta 0.03, zoom 1.008,
+boundmode 4); the slab's output becomes the feedback plane's texture for the next frame; a separate
+`jit.gl.videoplane foo` draws `fb` to the window. **It spiralled** — confirming `jit.gl.node`
+capture is the correct replacement for `usetexture`/`to_texture` under `glcore`, with no console
+errors. Two non-obvious points the written design didn't capture:
+
+* **Draw order is by `@layer`, not by bang order.** With children `@automatic 1`, the node draws
+  them in ascending `@layer`. New material must sit *below* the feedback plane (lower `@layer`) so
+  the plane composites over it, exactly as Sean's manual bang order did.
+* A textureless feedback plane at a *high* layer paints an opaque quad over everything and the
+  node captures black forever — the first probe was black for this reason. Fixed by layering.
+
+### The edits applied to the real patches
+
+`patches/Feedbax.maxpat` (object ids are the real ones, cross-checked against the file):
+
+* **Added** `obj-fbnode` = `jit.gl.node foo @name fb @capture 1 @automatic 1 @adapt 0 @dim 1920
+  1080 @erase_color 0. 0. 0. 1.` and `obj-fbdisp` = `jit.gl.videoplane foo @automatic 1
+  @transform_reset 2 @depth_enable 0 @layer 0` (the on-window display of `fb`).
+* **Reparented** the main feedback plane `obj-44`: context `foo` → `fb`, `@automatic 0` → `1`,
+  added `@layer 10` (top). Its `@blend_mode 6 8` (from the load-time `pak`, `obj-90`) and
+  scale/position math (`obj-77`/`obj-72`, incl. `xyratio` and `worldBump`) are unchanged.
+* **Rewired the feedback source**: removed `switch 2` (`obj-37`) → `feedbax.shaderfx` (`obj-148`);
+  added `obj-fbnode`:0 → `obj-148`:0. `shaderfx`'s output → `obj-44`'s texture inlet is unchanged.
+* **Display**: `obj-fbnode`:0 → `obj-fbdisp`:0.
+* **Cut the obsolete/`glcore`-dead cords**: trigger `obj-50` outlet 0 (`to_texture`) → render, and
+  outlet 2 (per-frame bang) → `obj-44` (the plane is now drawn by the node; keeping this would
+  double-draw it).
+* **Re-pointed the buses**: `erasetransparency` pak (`obj-56`) from render (`obj-49`) to
+  `obj-fbnode`; `r resolution` (`obj-186`) from `fst` (`obj-36`) to `obj-fbnode` (`@adapt 0`, so
+  a resolution preset now sets the capture-texture dims).
+
+`patches/feedbax.picsvid.maxpat`: `jit.gl.layer` (`obj-2`) reparented `foo` → `fb`, `@automatic 1`
+(kept `@layer 2`, `@enable 0`). `patches/feedbax.sound2.maxpat`: both `jit.gl.graph` (`obj-12`,
+`obj-213`) reparented `foo` → `fb`, `@automatic 0` → `1`, `@layer 3`.
+
+### What was verified in Max 9
+
+* The real `Feedbax.maxpat` opens and runs at ~60 fps with **no errors from the retrofit** — the
+  Console shows only the pre-existing harmless lines (`shell`/`ultraleap`/`jit.ndi.receive~ No such
+  object`, the vestigial `folder ./Cycling '74/max-help` watcher, `live.slider … "signal"`, `Mira
+  Initialized`, the OpenGL banner).
+* With a temporary seed child of `fb`, the loop is **closed**: the seed persists and recirculates
+  through Sean's real `shaderfx` (`td.rota` + HSL). The seed was removed after testing.
+* With the picsvid layer and sound2 graphs reparented, the **audio waveform graphs draw into the
+  feedback** (visible in the render window), confirming reparented material feeds the loop.
+
+Remaining fidelity items are listed under "What's left" above (trail-fade translation; a
+performer-driven spiral; optional removal of the vestigial `fst`/`dst`/`switch 2` objects).
 
 ## Environment notes for whoever tests next
 
