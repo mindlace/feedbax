@@ -9688,7 +9688,7 @@
 						944.0,
 						20.0
 					],
-					"text": "jit.gl.graph foo @antialias 1 @auto_material 0 @color 1 1 1 1 @lighting_enable 0 @shininess 0. @smooth_shading 0 @circpoints 5 @automatic 0 @shadow_caster 0 @line_width 2 @blend_enable 0"
+					"text": "jit.gl.graph fb @antialias 1 @auto_material 0 @color 1 1 1 1 @lighting_enable 0 @shininess 0. @smooth_shading 0 @circpoints 5 @automatic 1 @shadow_caster 0 @line_width 2 @blend_enable 0 @layer 3"
 				}
 			},
 			{
@@ -12394,7 +12394,7 @@
 						793.0,
 						20.0
 					],
-					"text": "jit.gl.graph foo @antialias 0 @auto_material 0 @color 1 1 1 1 @lighting_enable 0 @shininess 50 @smooth_shading 0 @circpoints 5 @automatic 0 @shadow_caster 0"
+					"text": "jit.gl.graph fb @antialias 0 @auto_material 0 @color 1 1 1 1 @lighting_enable 0 @shininess 50 @smooth_shading 0 @circpoints 5 @automatic 1 @shadow_caster 0 @layer 3"
 				}
 			},
 			{

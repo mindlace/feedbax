@@ -3892,7 +3892,7 @@
 						1021.75,
 						19.0
 					],
-					"text": "jit.gl.videoplane foo @automatic 0 @scale -1.78 1. 1. @color 1. 1. 1. 1. @blend_enable 1 @blend_mode 6 7 @position 0. 0. -0.4 @shadow_caster 0 @two_sided 0 @interp 0 @auto_material 0"
+					"text": "jit.gl.videoplane fb @automatic 1 @layer 10 @scale -1.78 1. 1. @color 1. 1. 1. 1. @blend_enable 1 @blend_mode 6 7 @position 0. 0. -0.4 @shadow_caster 0 @two_sided 0 @interp 0 @auto_material 0"
 				}
 			},
 			{
@@ -4495,6 +4495,63 @@
 						150.0,
 						22.0
 					]
+				}
+			},
+			{
+				"box": {
+					"id": "obj-fs-init",
+					"maxclass": "newobj",
+					"numinlets": 1,
+					"numoutlets": 1,
+					"outlettype": [
+						""
+					],
+					"patching_rect": [
+						150.0,
+						30.0,
+						70.0,
+						22.0
+					],
+					"text": "loadmess 0"
+				}
+			},
+			{
+				"box": {
+					"id": "obj-fbnode",
+					"maxclass": "newobj",
+					"numinlets": 1,
+					"numoutlets": 3,
+					"patching_rect": [
+						250.0,
+						860.0,
+						560.0,
+						22.0
+					],
+					"outlettype": [
+						"jit_gl_texture",
+						"",
+						""
+					],
+					"text": "jit.gl.node foo @name fb @capture 1 @automatic 1 @adapt 0 @dim 1920 1080 @erase_color 0. 0. 0. 1."
+				}
+			},
+			{
+				"box": {
+					"id": "obj-fbdisp",
+					"maxclass": "newobj",
+					"numinlets": 1,
+					"numoutlets": 2,
+					"patching_rect": [
+						250.0,
+						900.0,
+						470.0,
+						22.0
+					],
+					"outlettype": [
+						"jit_matrix",
+						""
+					],
+					"text": "jit.gl.videoplane foo @automatic 1 @transform_reset 2 @depth_enable 0 @layer 0"
 				}
 			}
 		],
@@ -5558,18 +5615,6 @@
 			{
 				"patchline": {
 					"destination": [
-						"obj-36",
-						0
-					],
-					"source": [
-						"obj-186",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
 						"obj-15",
 						0
 					],
@@ -5908,18 +5953,6 @@
 			{
 				"patchline": {
 					"destination": [
-						"obj-148",
-						0
-					],
-					"source": [
-						"obj-37",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
 						"obj-37",
 						0
 					],
@@ -6195,28 +6228,6 @@
 			},
 			{
 				"patchline": {
-					"destination": [
-						"obj-44",
-						0
-					],
-					"midpoints": [
-						283.5,
-						411.6999918818474,
-						801.750000834465,
-						411.6999918818474,
-						801.750000834465,
-						501.6999918818474,
-						868.5,
-						501.6999918818474
-					],
-					"source": [
-						"obj-50",
-						2
-					]
-				}
-			},
-			{
-				"patchline": {
 					"color": [
 						0.156863,
 						0.8,
@@ -6265,24 +6276,6 @@
 			},
 			{
 				"patchline": {
-					"color": [
-						0.156863,
-						0.8,
-						0.54902,
-						1.0
-					],
-					"destination": [
-						"obj-49",
-						0
-					],
-					"source": [
-						"obj-50",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
 					"destination": [
 						"obj-50",
 						0
@@ -6325,18 +6318,6 @@
 					],
 					"source": [
 						"obj-55",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-49",
-						0
-					],
-					"source": [
-						"obj-56",
 						0
 					]
 				}
@@ -6870,6 +6851,66 @@
 					],
 					"source": [
 						"obj-99",
+						0
+					]
+				}
+			},
+			{
+				"patchline": {
+					"destination": [
+						"obj-39",
+						0
+					],
+					"source": [
+						"obj-fs-init",
+						0
+					]
+				}
+			},
+			{
+				"patchline": {
+					"destination": [
+						"obj-148",
+						0
+					],
+					"source": [
+						"obj-fbnode",
+						0
+					]
+				}
+			},
+			{
+				"patchline": {
+					"destination": [
+						"obj-fbdisp",
+						0
+					],
+					"source": [
+						"obj-fbnode",
+						0
+					]
+				}
+			},
+			{
+				"patchline": {
+					"destination": [
+						"obj-fbnode",
+						0
+					],
+					"source": [
+						"obj-56",
+						0
+					]
+				}
+			},
+			{
+				"patchline": {
+					"destination": [
+						"obj-fbnode",
+						0
+					],
+					"source": [
+						"obj-186",
 						0
 					]
 				}
