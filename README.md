@@ -12,7 +12,8 @@ Sean Stevens passed on March 9, 2026.
 
 ### Requirements
 
-- **Max 9** (the main patch was saved in Max 9.0.7). Download from [cycling74.com](https://cycling74.com/downloads). Max can open and run patches in its free mode without a license.
+- **Max 8.6.5 or Max 9** (the patch was saved in Max 9.0.7 and opens in Max 8.6.5). Download from [cycling74.com](https://cycling74.com/downloads). Max can open and run patches in its free mode without a license.
+  **Status (Aug 2026):** the patch loads and renders, but the feedback capture it uses (`usetexture`/`to_texture`) is a legacy Jitter mechanism that is a silent no-op on the modern `gl3` GL engine (Max 8.6 default, Max 9 only option), so the loop does not close on a stock install. Sean ran Max 8 with the legacy `gl2` engine. See [docs/diagnosis-2026-08-23.md](docs/diagnosis-2026-08-23.md) for the evidence, what has been fixed, and the planned `jit.gl.node` retrofit.
 - **A camera** — any USB webcam will work. NDI network camera input is also supported.
 - **A microphone or audio input** — Feedbax is audio-reactive. The built-in mic works, or use a line-in / audio interface.
 
@@ -25,7 +26,7 @@ Sean Stevens passed on March 9, 2026.
 
 1. Open `patches/Feedbax.maxpat` in Max 9.
 2. The patch opens with a small preview window (320×180). To go fullscreen or change resolution, use the resolution presets in the patch (options from 1280×720 up to 7680×4320, including 3840×2160 for 4K monitors).
-3. Click the toggle at the top to start the metro (frame clock). You should see the render window appear.
+3. The metro (frame clock) starts at load; the render window appears automatically. The FS toggle at the top left is now initialised at load so the preview feedback path is open; toggle it (or press Esc with the render window focused) to go fullscreen, which switches to the full-resolution feedback texture.
 4. In the `p picsVid` subpatcher, enable a camera input (USB or NDI) or load an image/video file.
 5. Adjust shader parameters via the UI controls or Mira/Ultraleap if available.
 6. Audio input is live from `adc~` — make sure Max's audio is turned on (Options → Audio Status) and your input device is selected.
@@ -66,8 +67,8 @@ metro (configurable, default 60hz)
   ├─ p shaderfx ── receives rendered texture + control params
   │                 → td.rota.jxs (rotation / zoom / offset)
   │                 → jit.gl.pix (HSL hue shift, saturation, lightness)
-  │                 → cc.scalebias.jxs (scale + bias)
-  │                 → jit.gl.pix brcosa (brightness / contrast / saturation)
+  │                 → cc.scalebias.jxs (scale + bias)            [disconnected in v123]
+  │                 → jit.gl.pix brcosa (brightness / contrast / saturation)  [disconnected in v123]
   │
   ├─ FEEDBACK LOOP:
   │    jit.gl.texture "fst" (full resolution, e.g. 3840×2160)
@@ -83,7 +84,7 @@ Control input flows through two paths that pack a 9-float vector (theta, scale, 
 - **p webUI** — Mira iPad multitouch + on-screen controls → `s shadeCtl`
 - **p LeapGemini** — Ultraleap hand tracking → `s shadeCtlLeap` (overrides iPad when hands are detected)
 
-All shader files referenced (`td.rota.jxs`, `cc.scalebias.jxs`, `co.chromakey.hsv.jxs`, `co.lumakey.jxs`) are standard Max/Jitter builtins. The `brcosa` gen patcher and the custom HSL-shift `jit.gl.pix` are compiled inline in the `.maxpat` JSON.
+All shader files referenced (`td.rota.jxs`, `cc.scalebias.jxs`, `co.chromakey.hsv.jxs`, `co.lumakey.jxs`) and `brcosa.genjit` ship with Max. Note that in this version (v123) the live chain is only `td.rota.jxs → HSL jit.gl.pix`; the `cc.scalebias` slab and the `brcosa` gen stage are present in the file but disconnected (Sean's Max 8 performance builds had brcosa in the chain). The authoritative description of the pipeline is in [docs/spec](docs/spec/README.md).
 
 ## File Structure
 
@@ -99,7 +100,13 @@ input/
   transparent-background/      ← put your sticker/overlay images here (organized in subdirectories as you like)
 output/                        ← screenshots save here
 docs/
+  spec/                        ← technical description for re-implementation (start at spec/README.md)
+  diagnosis-2026-08-23.md      ← why it didn't run, what was fixed, what is left
   *.png                        ← screenshots of each subpatcher for reference
+tools/
+  maxpat2txt.py                ← render a .maxpat as a readable object/connection listing
+  maxdiff.py                   ← structural diff of two patches (or sub-patchers)
+  srxref.py                    ← cross-reference every send/receive bus across patches/
 version.txt                    ← current version identifier
 ```
 
@@ -107,9 +114,9 @@ The Ultrawide variant adds multi-monitor resolution presets (e.g. 6400×1800 for
 
 ### Media Setup
 
-**Sticker images**: Place your transparent-background images (PNGs with alpha channels) in `input/transparent-background/`. You can organize them in subdirectories — the patch scans recursively. On load, the patch automatically resolves its own location and finds the `input/` directory relative to the project root.
+**Sticker images**: Place your transparent-background images (PNGs with alpha channels) in `input/transparent-background/`. On load, `feedbax.pathsetup` resolves the project root and populates the sticker menu in `p pic` (inside `feedbax.picsvid`) from that folder; the "rescan" message boxes in picsVid re-run the scan if you add files while running. Select an image from that menu (or with the Video +/− buttons in the webUI) and turn on "pic enable".
 
-**Alpha masks**: The main patch expects the alpha mask images in `assets/` to be findable by Max's search path. The simplest approach: in Max, go to Options → File Preferences and add the `assets/` folder to the search path. Alternatively, copy the two PNG files into the same directory as the patch.
+**Alpha masks**: `feedbax.pathsetup` adds `assets/` to Max's search path at load, so the two mask PNGs are found without any File Preferences setup. (They only affect the live-camera path.)
 
 **Screenshots**: Captured screenshots save to the `output/` directory in the project root.
 
