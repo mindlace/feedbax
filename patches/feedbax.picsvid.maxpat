@@ -187,7 +187,7 @@
 						388.0,
 						22.0
 					],
-					"text": "folder input/transparent-background/"
+					"text": "; feedbax_rescan bang"
 				}
 			},
 			{
@@ -205,7 +205,7 @@
 						422.0,
 						22.0
 					],
-					"text": "folder input/transparent-background/"
+					"text": "; feedbax_rescan bang"
 				}
 			},
 			{
@@ -223,7 +223,7 @@
 						428.0,
 						22.0
 					],
-					"text": "folder input/transparent-background/"
+					"text": "; feedbax_rescan bang"
 				}
 			},
 			{
@@ -241,7 +241,7 @@
 						526.0,
 						22.0
 					],
-					"text": "folder input/transparent-background/"
+					"text": "; feedbax_rescan bang"
 				}
 			},
 			{
@@ -267,7 +267,7 @@
 						220.0,
 						62.0
 					],
-					"text": "folder input/transparent-background/"
+					"text": "; feedbax_rescan bang"
 				}
 			},
 			{
@@ -1886,7 +1886,7 @@
 						447.0,
 						22.0
 					],
-					"text": "folder AS input/transparent-background/"
+					"text": "; feedbax_rescan bang"
 				}
 			},
 			{
@@ -1962,7 +1962,7 @@
 						130.0,
 						23.0
 					],
-					"text": "folder input/transparent-background/"
+					"text": "folder"
 				}
 			},
 			{
@@ -6124,7 +6124,7 @@
 						220.0,
 						62.0
 					],
-					"text": "folder AS input/transparent-background/"
+					"text": "; feedbax_rescan bang"
 				}
 			},
 			{
@@ -10627,24 +10627,6 @@
 					],
 					"text": "receive feedbax_sticker_folder"
 				}
-			},
-			{
-				"box": {
-					"id": "obj-recv-as-folder",
-					"maxclass": "newobj",
-					"numinlets": 1,
-					"numoutlets": 1,
-					"outlettype": [
-						""
-					],
-					"patching_rect": [
-						50.0,
-						10.0,
-						190.0,
-						22.0
-					],
-					"text": "receive feedbax_as_sticker_folder"
-				}
 			}
 		],
 		"lines": [
@@ -10675,18 +10657,6 @@
 					"source": [
 						"obj-1",
 						2
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-14",
-						0
-					],
-					"source": [
-						"obj-10",
-						0
 					]
 				}
 			},
@@ -11796,18 +11766,6 @@
 					],
 					"source": [
 						"obj-189",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-14",
-						0
-					],
-					"source": [
-						"obj-19",
 						0
 					]
 				}
@@ -13596,35 +13554,11 @@
 			{
 				"patchline": {
 					"destination": [
-						"obj-14",
-						0
-					],
-					"source": [
-						"obj-44",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
 						"obj-1",
 						0
 					],
 					"source": [
 						"obj-45",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-14",
-						0
-					],
-					"source": [
-						"obj-46",
 						0
 					]
 				}
@@ -13988,18 +13922,6 @@
 			{
 				"patchline": {
 					"destination": [
-						"obj-14",
-						0
-					],
-					"source": [
-						"obj-7",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
 						"obj-57",
 						0
 					],
@@ -14019,18 +13941,6 @@
 					"order": 0,
 					"source": [
 						"obj-70",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-14",
-						0
-					],
-					"source": [
-						"obj-72",
 						0
 					]
 				}
@@ -14081,18 +13991,6 @@
 					],
 					"source": [
 						"obj-76",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-14",
-						0
-					],
-					"source": [
-						"obj-77",
 						0
 					]
 				}
@@ -14411,18 +14309,6 @@
 					],
 					"source": [
 						"obj-recv-sticker-folder",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-14",
-						0
-					],
-					"source": [
-						"obj-recv-as-folder",
 						0
 					]
 				}

@@ -22,20 +22,54 @@
 		"boxes": [
 			{
 				"box": {
+					"id": "obj-13",
+					"maxclass": "comment",
+					"numinlets": 1,
+					"numoutlets": 0,
+					"patching_rect": [
+						320.0,
+						30.0,
+						420.0,
+						22.0
+					],
+					"text": "Resolve project root for portable file paths: thispatcher 'path' answers on the RIGHT outlet with the folder of this file (patches/); regexp outlet 1 = parent folder as one symbol.",
+					"linecount": 4
+				}
+			},
+			{
+				"box": {
 					"id": "obj-1",
 					"maxclass": "newobj",
 					"numinlets": 1,
 					"numoutlets": 1,
-					"outlettype": [
-						"bang"
-					],
 					"patching_rect": [
 						50.0,
 						30.0,
-						58.0,
+						260.0,
 						22.0
 					],
-					"text": "loadbang"
+					"text": "loadbang",
+					"outlettype": [
+						"bang"
+					]
+				}
+			},
+			{
+				"box": {
+					"id": "obj-14",
+					"maxclass": "newobj",
+					"numinlets": 0,
+					"numoutlets": 1,
+					"patching_rect": [
+						200.0,
+						30.0,
+						260.0,
+						22.0
+					],
+					"text": "r feedbax_rescan",
+					"outlettype": [
+						""
+					]
 				}
 			},
 			{
@@ -44,16 +78,16 @@
 					"maxclass": "message",
 					"numinlets": 2,
 					"numoutlets": 1,
-					"outlettype": [
-						""
-					],
 					"patching_rect": [
 						50.0,
 						70.0,
-						35.0,
+						40.0,
 						22.0
 					],
-					"text": "path"
+					"text": "path",
+					"outlettype": [
+						""
+					]
 				}
 			},
 			{
@@ -62,60 +96,39 @@
 					"maxclass": "newobj",
 					"numinlets": 1,
 					"numoutlets": 2,
-					"outlettype": [
-						"",
-						""
-					],
 					"patching_rect": [
 						50.0,
 						110.0,
-						72.0,
+						260.0,
 						22.0
 					],
-					"text": "thispatcher"
-				}
-			},
-			{
-				"box": {
-					"comment": "thispatcher outputs 'path <dir>' — route strips the selector",
-					"id": "obj-4",
-					"maxclass": "newobj",
-					"numinlets": 1,
-					"numoutlets": 2,
+					"text": "thispatcher",
 					"outlettype": [
 						"",
 						""
-					],
-					"patching_rect": [
-						50.0,
-						150.0,
-						63.0,
-						22.0
-					],
-					"text": "route path"
+					]
 				}
 			},
 			{
 				"box": {
-					"comment": "Strip trailing directory (patches/) to get project root",
 					"id": "obj-5",
 					"maxclass": "newobj",
 					"numinlets": 1,
 					"numoutlets": 5,
+					"patching_rect": [
+						50.0,
+						150.0,
+						260.0,
+						22.0
+					],
+					"text": "regexp (.+[\\\\/]).+[\\\\/]$ @substitute %1",
 					"outlettype": [
 						"",
 						"",
 						"",
 						"",
 						""
-					],
-					"patching_rect": [
-						50.0,
-						190.0,
-						280.0,
-						22.0
-					],
-					"text": "regexp (.+[\\\\/]).+[\\\\/]$ @substitute %1"
+					]
 				}
 			},
 			{
@@ -123,14 +136,17 @@
 					"id": "obj-6",
 					"maxclass": "newobj",
 					"numinlets": 1,
-					"numoutlets": 0,
+					"numoutlets": 1,
 					"patching_rect": [
 						50.0,
-						230.0,
-						120.0,
+						190.0,
+						260.0,
 						22.0
 					],
-					"text": "value feedbax_root"
+					"text": "value feedbax_root",
+					"outlettype": [
+						""
+					]
 				}
 			},
 			{
@@ -139,16 +155,34 @@
 					"maxclass": "newobj",
 					"numinlets": 1,
 					"numoutlets": 1,
-					"outlettype": [
-						""
-					],
 					"patching_rect": [
 						50.0,
-						270.0,
-						280.0,
+						250.0,
+						260.0,
 						22.0
 					],
-					"text": "sprintf symout folder %sinput/transparent-background/"
+					"text": "sprintf symout %sinput/transparent-background/",
+					"outlettype": [
+						""
+					]
+				}
+			},
+			{
+				"box": {
+					"id": "obj-15",
+					"maxclass": "newobj",
+					"numinlets": 1,
+					"numoutlets": 1,
+					"patching_rect": [
+						50.0,
+						290.0,
+						260.0,
+						22.0
+					],
+					"text": "prepend folder",
+					"outlettype": [
+						""
+					]
 				}
 			},
 			{
@@ -159,8 +193,8 @@
 					"numoutlets": 0,
 					"patching_rect": [
 						50.0,
-						310.0,
-						145.0,
+						330.0,
+						260.0,
 						22.0
 					],
 					"text": "send feedbax_sticker_folder"
@@ -168,83 +202,90 @@
 			},
 			{
 				"box": {
-					"id": "obj-9",
+					"id": "obj-16",
 					"maxclass": "newobj",
 					"numinlets": 1,
 					"numoutlets": 1,
-					"outlettype": [
-						""
-					],
 					"patching_rect": [
 						380.0,
-						270.0,
+						250.0,
+						260.0,
+						22.0
+					],
+					"text": "sprintf symout %sassets",
+					"outlettype": [
+						""
+					]
+				}
+			},
+			{
+				"box": {
+					"id": "obj-17",
+					"maxclass": "newobj",
+					"numinlets": 1,
+					"numoutlets": 1,
+					"patching_rect": [
+						380.0,
 						290.0,
+						260.0,
 						22.0
 					],
-					"text": "sprintf symout folder AS %sinput/transparent-background/"
+					"text": "prepend append",
+					"outlettype": [
+						""
+					]
 				}
 			},
 			{
 				"box": {
-					"id": "obj-10",
-					"maxclass": "newobj",
-					"numinlets": 1,
-					"numoutlets": 0,
-					"patching_rect": [
-						380.0,
-						310.0,
-						165.0,
-						22.0
-					],
-					"text": "send feedbax_as_sticker_folder"
-				}
-			},
-			{
-				"box": {
-					"id": "obj-11",
+					"id": "obj-18",
 					"maxclass": "newobj",
 					"numinlets": 1,
 					"numoutlets": 1,
+					"patching_rect": [
+						380.0,
+						330.0,
+						260.0,
+						22.0
+					],
+					"text": "append 1",
 					"outlettype": [
 						""
-					],
-					"patching_rect": [
-						50.0,
-						370.0,
-						230.0,
-						22.0
-					],
-					"text": "sprintf symout prefix %sinput/transparent-background/"
+					]
 				}
 			},
 			{
 				"box": {
-					"id": "obj-12",
+					"id": "obj-19",
 					"maxclass": "newobj",
 					"numinlets": 1,
-					"numoutlets": 0,
+					"numoutlets": 1,
 					"patching_rect": [
-						50.0,
-						410.0,
-						150.0,
+						380.0,
+						370.0,
+						260.0,
 						22.0
 					],
-					"text": "send feedbax_sticker_prefix"
+					"text": "filepath search",
+					"outlettype": [
+						""
+					]
 				}
 			},
 			{
 				"box": {
-					"id": "obj-13",
+					"id": "obj-20",
 					"maxclass": "comment",
 					"numinlets": 1,
 					"numoutlets": 0,
 					"patching_rect": [
-						350.0,
-						30.0,
-						300.0,
-						20.0
+						380.0,
+						410.0,
+						420.0,
+						22.0
 					],
-					"text": "Resolve project root for portable file paths"
+					"text": "adds <root>/assets (and subfolders) to the Max search path for this session, so importmovie NormalFullAlpha1080p1.png etc. resolve",
+					"linecount": 3
 				}
 			}
 		],
@@ -264,6 +305,18 @@
 			{
 				"patchline": {
 					"destination": [
+						"obj-2",
+						0
+					],
+					"source": [
+						"obj-14",
+						0
+					]
+				}
+			},
+			{
+				"patchline": {
+					"destination": [
 						"obj-3",
 						0
 					],
@@ -276,24 +329,12 @@
 			{
 				"patchline": {
 					"destination": [
-						"obj-4",
-						0
-					],
-					"source": [
-						"obj-3",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
 						"obj-5",
 						0
 					],
 					"source": [
-						"obj-4",
-						0
+						"obj-3",
+						1
 					]
 				}
 			},
@@ -305,7 +346,7 @@
 					],
 					"source": [
 						"obj-5",
-						0
+						1
 					]
 				}
 			},
@@ -317,6 +358,18 @@
 					],
 					"source": [
 						"obj-5",
+						1
+					]
+				}
+			},
+			{
+				"patchline": {
+					"destination": [
+						"obj-15",
+						0
+					],
+					"source": [
+						"obj-7",
 						0
 					]
 				}
@@ -328,7 +381,7 @@
 						0
 					],
 					"source": [
-						"obj-7",
+						"obj-15",
 						0
 					]
 				}
@@ -336,11 +389,23 @@
 			{
 				"patchline": {
 					"destination": [
-						"obj-9",
+						"obj-16",
 						0
 					],
 					"source": [
 						"obj-5",
+						1
+					]
+				}
+			},
+			{
+				"patchline": {
+					"destination": [
+						"obj-17",
+						0
+					],
+					"source": [
+						"obj-16",
 						0
 					]
 				}
@@ -348,11 +413,11 @@
 			{
 				"patchline": {
 					"destination": [
-						"obj-10",
+						"obj-18",
 						0
 					],
 					"source": [
-						"obj-9",
+						"obj-17",
 						0
 					]
 				}
@@ -360,23 +425,11 @@
 			{
 				"patchline": {
 					"destination": [
-						"obj-11",
+						"obj-19",
 						0
 					],
 					"source": [
-						"obj-5",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-12",
-						0
-					],
-					"source": [
-						"obj-11",
+						"obj-18",
 						0
 					]
 				}

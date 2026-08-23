@@ -4496,6 +4496,24 @@
 						22.0
 					]
 				}
+			},
+			{
+				"box": {
+					"id": "obj-fs-init",
+					"maxclass": "newobj",
+					"numinlets": 1,
+					"numoutlets": 1,
+					"outlettype": [
+						""
+					],
+					"patching_rect": [
+						150.0,
+						30.0,
+						70.0,
+						22.0
+					],
+					"text": "loadmess 0"
+				}
 			}
 		],
 		"lines": [
@@ -6870,6 +6888,18 @@
 					],
 					"source": [
 						"obj-99",
+						0
+					]
+				}
+			},
+			{
+				"patchline": {
+					"destination": [
+						"obj-39",
+						0
+					],
+					"source": [
+						"obj-fs-init",
 						0
 					]
 				}
