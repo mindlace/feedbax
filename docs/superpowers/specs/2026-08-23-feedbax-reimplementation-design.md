@@ -15,8 +15,9 @@ history and the party scenario.
 1. **Accessibility.** A non-technical person double-clicks an app and Feedbax runs. No Max
    license, no patch files, no engine preferences, no "why is the window black" (the failure mode
    that motivated the diagnosis doc).
-2. **Extensibility.** Adding a new way to get imagery/video into the instrument — or a new way to
-   control it — means implementing one small interface, not rewiring a patch.
+2. **Extensibility.** Adding a new way to get imagery/video into the instrument, a new
+   transformation of it on the way in, or a new way to control it means implementing one small
+   interface, not rewiring a patch.
 3. **The party scenario.** A mac mini + projector + microphone is a complete rig. Guests hit
    `feedbax.local` on their phones, upload images that get stickerified, and a curated jukebox
    queue feeds them into the visuals. People near the rig affect the rendering in ways they can
@@ -98,6 +99,11 @@ Unity/Godot (an engine's worth of ceremony for three shaders, plus export/licens
 one .app: the Metal engine and the embedded server live together, so the queue, the renderer, and
 the operator UI share state without IPC.
 
+The Swift core is also a stated learning vehicle — the maintainer intends to pick up Swift
+through this codebase — so the engine is written to teach: small modules, doc comments that
+explain *why*, no cleverness. That is the same property that keeps the extension points
+approachable.
+
 ---
 
 ## 4. Architecture
@@ -111,19 +117,21 @@ flowchart LR
       comp["Compositor\nseed layers · waveforms\ndraw order"] --> core
       core --> out["OutputStage\nN viewports / displays\nmirror · span · crop"]
     end
-    subgraph sources["SeedSources"]
-      stick["StickerSource\n(folder + jukebox queue)"] --> comp
-      movie["MovieSource"] --> comp
-      cam["CameraSource\n(USB / Continuity)\nbrcosa → luma/chroma key"] --> comp
+    subgraph sources["Seed layers"]
+      stick["StickerSource\n(folder + jukebox queue)"] --> filt
+      movie["MovieSource"] --> filt
+      cam["CameraSource\n(USB / Continuity)"] --> filt
+      filt["Per-layer filter chains\nauto-matte · luma/chroma key\nbrcosa · sticker border"] --> comp
     end
     subgraph control["Control & modulation"]
       cv["ControlVector router\n9 slots · arbitration\n~100 ms smoothing"] --> core
       audio["AudioAnalysis\n3 EQ bands → bumps\nwaveform buffers"] --> comp
       audio --> cv
       opui["Operator UI (SwiftUI)\nsliders · preview · queue"] --> cv
+      local["Local input\nkeyboard · trackpad · gamepad"] --> cv
     end
     subgraph party["Party server (embedded)"]
-      http["HTTP/WS + Bonjour\nfeedbax.local"] --> stickify["Stickerifier\n(Vision subject lift\n+ border)"]
+      http["HTTP/WS + Bonjour\nfeedbax.local"] --> stickify["Stickerifier\n(auto-matte + border\nfilter chain)"]
       stickify --> queue["Jukebox queue\nSQLite · moderation"]
       queue --> stick
     end
@@ -171,9 +179,9 @@ ships mirror + span; the viewport abstraction is what matters now.
 
 ## 5. The extension interfaces (driver #2)
 
-Three small protocols, extracted from how the original actually routes data. Everything the party
-scenario adds later — depth sensors, more cameras, generative layers — is an implementation of
-one of these, not a change to the engine.
+Four small protocols, extracted from how the original actually routes data. Everything the party
+scenario adds later — depth sensors, more cameras, generative layers, new looks on the way in —
+is an implementation of one of these, not a change to the engine.
 
 ### `SeedSource` — "a thing that produces imagery"
 
@@ -192,18 +200,56 @@ Rules the extraction surfaced, honored at the protocol level:
 
 * Sources decode on *selection*, never per render frame; movies advance on their own clock
   (AVPlayer), and `tick` merely fetches the current frame.
-* Keying (two-pass luma cascade, HSV-weighted chroma, one shared backdrop color) is a decorator
-  applied to camera-class sources only — sticker alpha passes straight through, as the original.
+* Sources produce **raw** imagery. Everything done to it on the way in — keying, color, matting —
+  lives in the layer's *filter chain* (next section), not inside the source. Writing a new look
+  never means writing a new camera.
 * List-backed sources (sticker folder, jukebox queue) publish their item count so index-based and
   normalized-[0,1] selectors rebind live on rescan.
-* The camera/picture decision is one explicit mode switch producing one texture per frame — the
-  original's three-toggles-that-must-agree and last-writer-wins layer-enable races are documented
-  bugs we fix, not behavior we port.
+* The original's camera-vs-picture either/or becomes the parity configuration of *one* layer —
+  a single explicit mode switch, fixing the documented three-toggles-that-must-agree and
+  last-writer-wins enable races. The compositor itself is N-layer (z-order and blend per layer),
+  so the party and room phases run several seed layers at once; the original simply never had
+  more than one. This — plus the filter chains — is the "mixer" the original lacked.
 
 Built-in implementations, in build order: `StickerSource` (folder scan → later fed by the queue),
 `MovieSource`, `CameraSource` (USB + Continuity), and later `NDISource`, `DepthSource`.
 Waveforms are not textures — they stay a built-in compositor layer (polyline geometry), matching
 the original's radial/linear line drawing with per-attribute bindings.
+
+### `TextureFilter` — "a thing that transforms imagery on its way in"
+
+```swift
+protocol TextureFilter: AnyObject {
+  var id: FilterID { get }
+  var enabled: Bool { get set }
+  /// Texture in, texture out, on the frame clock.
+  func apply(_ input: MTLTexture, _ frame: FrameContext) -> MTLTexture
+}
+```
+
+Every seed layer owns an ordered filter chain between its source and the compositor — the
+channel strip the original never had (its keying was hardwired into the camera path). Any filter
+attaches to any source. Built-ins:
+
+* **`AutoMatteFilter`** — the headline addition relative to the original: automatic background
+  removal on *any* source. Live video and movies use Vision person segmentation per frame — it
+  runs on the Neural Engine, so it doesn't compete with the 8K loop for GPU bandwidth, and its
+  masks arrive low-res and upsampled, which suits this instrument fine. Stills use subject
+  lifting (any subject, higher quality), run once at decode and cached. Arbitrary-subject matting
+  on *live* video is heavier; it ships as a reduced-cadence mode (refresh the mask every N
+  frames) to experiment with.
+* **`LumaKeyFilter` / `ChromaKeyFilter`** — the parity keyers (two-pass midtone cascade;
+  HSV-weighted chroma), their strict either/or preserved as a UI rule on the camera chain, not
+  as a chain limitation.
+* **`BrcosaFilter`** — the unclamped camera color stage, doubling as the optional v122 output
+  grade.
+* **`MatteOverlayFilter`** — the vignette matte, reading alpha (the fixed version, §6).
+* **`StickerBorderFilter`** — dilated white outline. `AutoMatte → StickerBorder` *is*
+  "stickerify": the party upload path (§7) runs exactly this chain at ingest, so upload-time and
+  live-time background removal are one implementation.
+
+Parity defaults per layer: camera = brcosa → keyer; sticker and movie = empty chain (file alpha
+passes straight through, as the original).
 
 ### `ControlSurface` — "a thing a performer steers with"
 
@@ -211,9 +257,23 @@ Produces (partial) writes into the 9-slot control vector (hue, lightness bias, [
 panY, zoom, theta, [dead], saturation) with the documented per-slot range mappings. The router
 owns: recompute-every-frame + diff-before-broadcast, the hard-cut arbitration between surfaces
 with a presence watchdog (Leap-style: tracked source primary, manual fallback after 2 s), global
-smoothing (100 ms ramp / 4 ms grain, both global knobs), and SInvert. Built-ins: operator-UI
-sliders, and later touch surfaces, hand tracking (the spec §04 Leap mapping ports directly),
-MIDI/OSC.
+smoothing (100 ms ramp / 4 ms grain, both global knobs), and SInvert.
+
+The performer's baseline is local hardware, present from P1 — the original gave the performer
+~7 continuous axes plus booleans, and that must not wait for exotic surfaces:
+
+* **Operator-UI sliders** — every axis and toggle, always available.
+* **Keyboard + trackpad** — the trackpad is the pan surface (the original's shader-pan touch
+  role), pinch/scroll drives zoom, modifier-held drags take hue/theta, and keys carry the
+  booleans (SInvert, live/picture mode, bump enables, fullscreen).
+* **Game controller** (GameController framework — stock PS/Xbox pads pair natively): two sticks
+  and two triggers are six analog axes — sticks → pan + hue/lightness, triggers → zoom/theta,
+  d-pad steps erase and saturation, buttons carry the booleans. A ~$40 gamepad covers nearly the
+  whole control vector with zero custom hardware.
+
+Later surfaces: touch (the two-role split the original used), hand tracking (the spec §04 Leap
+mapping ports directly), MIDI/OSC. Mappings live in a bindings table, not code — remapping an
+axis is data.
 
 ### `Modulator` — "a signal that animates a parameter"
 
@@ -244,7 +304,7 @@ end up in tests (§9):
 | 9 | Cold-start defaults: hue 0.02, lightness 0.5, sat 0.5 (nonzero, visually significant) | §01 |
 | 10 | Bumps are smoothed levels, default off; wave-2 alpha = base + envelope, unclamped | §03 |
 | 11 | Waveform 1: radial, bottom, thick burnt-orange; waveform 2: dotted cyan, `(srcα,dstα)` | §03 |
-| 12 | Keying camera-only; luma = two-pass midtone cascade; chroma HSV weights (4,1,2) | §02 |
+| 12 | Parity default keeps keyers on the camera chain only; luma = two-pass midtone cascade; chroma HSV weights (4,1,2) | §02 |
 | 13 | brcosa: ship as a toggle. Off = v123 parity; on = Sean's performed v122 look (exact math in spec) | §01/§05 |
 | 14 | No LFOs, no idle animation, no auto-drift | §04 |
 
@@ -282,7 +342,8 @@ sequenceDiagram
   Android browsers often don't, so **the projected QR code always carries the numeric-IP URL**
   and `feedbax.local` is the memorable alias, not the mechanism. Networkless parties: the mini
   hosts its own Wi-Fi via Internet Sharing, or a pocket travel router; both documented in setup.
-* **Stickerification.** Vision subject lifting produces the cutout mask; a dilated white border
+* **Stickerification.** The upload path runs the same `AutoMatte → StickerBorder` filter chain
+  the renderer uses (§5): Vision subject lifting produces the cutout, a dilated white border
   gives the sticker look. Uploads that are already transparent PNGs pass through untouched.
   On-device, no cloud, fast on Apple silicon.
 * **Curation.** Guests are anonymous per-device IDs with a per-guest rate limit. The host and
@@ -344,9 +405,9 @@ a mock API, in the daily SvelteKit toolchain.
 
 | Phase | Deliverable | Proves |
 |---|---|---|
-| **P1 — Parity instrument** | Feedbax.app: engine + sticker folder + movie playback + mic waveforms/bumps + operator UI + fullscreen + res/rate presets + still capture | The look survives the port (checklist §6, golden frames) |
-| **P2 — Party** | Embedded server, upload → stickerify → moderation → jukebox, QR overlay, sessions | The mini-at-a-party story end to end |
-| **P3 — Room** | CameraSource + keying UI, presence/motion modulators, multi-display span | Guests affect rendering; Sean's unfinished multi-monitor wish |
+| **P1 — Parity instrument** | Feedbax.app: engine + per-layer filter chains (brcosa, keyers) + sticker folder + movie playback + mic waveforms/bumps + operator UI + keyboard/trackpad and gamepad surfaces + fullscreen + res/rate presets + still capture | The look survives the port (checklist §6, golden frames); performable with stock hardware |
+| **P2 — Party** | Embedded server, upload → stickerify → moderation → jukebox, QR overlay, sessions; `AutoMatteFilter` lands here (stills + movies) | The mini-at-a-party story end to end |
+| **P3 — Room** | CameraSource + live auto-matte + keying UI, presence/motion modulators, multi-display span | Guests affect rendering; Sean's unfinished multi-monitor wish |
 | **P4 — Reach** | Depth/hand tracking surfaces, MIDI/OSC, NDI/Syphon interop | The extension interfaces earn their keep |
 
 P1 is deliberately the whole *instrument*, not a tech demo — it replaces the Max patch for the
@@ -358,10 +419,18 @@ solo performer before anything party-shaped exists.
 
 1. **Mac-only lock-in** — the recommendation buys fidelity and app-ness with portability. Any
    future scenario (a Linux gallery box?) that should veto Option A?
-2. **Swift core comfort** — the split keeps daily work in SvelteKit, but the engine is Swift.
-   Acceptable maintenance posture?
-3. **Name** — does the reimplementation stay "Feedbax"?
-4. **brcosa default** — proposal ships it as a toggle, default *off* (v123 parity). Sean
+2. **Name** — does the reimplementation stay "Feedbax"?
+3. **brcosa default** — proposal ships it as a toggle, default *off* (v123 parity). Sean
    *performed* with it on (v122); default on instead?
-5. **Minimal presets** — the original had none; a "save current settings" is nearly free in P1.
+4. **Minimal presets** — the original had none; a "save current settings" is nearly free in P1.
    Include?
+
+### Resolved
+
+* **Swift core** (2026-08-23): approved — and doubles as a Swift learning vehicle for the
+  maintainer, which §3 folds into how the engine code is written.
+* **Filter/mixer layer** (2026-08-23): the reviewer's instinct that a filter/mixer was missing
+  was right — added as the per-layer `TextureFilter` chains plus the N-layer compositor (§5),
+  with auto-stickerification (`AutoMatteFilter`) as the flagship filter.
+* **Baseline local input** (2026-08-23): keyboard/trackpad and game-controller surfaces are P1
+  deliverables covering the ~7 axes + booleans; exotic surfaces are additive.
