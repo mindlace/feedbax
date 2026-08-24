@@ -46,8 +46,9 @@ history and the party scenario.
 A 60 Hz feedback loop: partially erase the accumulator, warp the previous frame
 (rotate/zoom/pan with mirror-fold edges, additive HSL shift), draw fresh seed material *under* it
 (stickers, movie frames, keyed camera, two audio waveforms), blend the warped past over the
-present with `(SRC_ALPHA, DST_ALPHA)`, capture, repeat. Seven live control slots plus erase
-amount and a kaleidoscope sign-flip, everything ramped over ~100 ms. That's the whole instrument;
+present with `(SRC_ALPHA, DST_ALPHA)`, capture, repeat. Seven live control slots ramped over
+~100 ms, plus an *unsmoothed* erase amount and a hard kaleidoscope sign-flip. That's the whole
+instrument;
 the character lives in about five exact constants and two shaders (spec README, "What makes the
 look").
 
@@ -65,9 +66,11 @@ compositor, one audio analysis chain, and a control-vector router.
 SwiftUI shell; Metal render core; AVFoundation for cameras (USB, and any iPhone via Continuity
 Camera — zero drivers); AVAudioEngine + vDSP for mic analysis; Vision's subject-lifting
 (`VNGenerateForegroundInstanceMaskRequest`, macOS 14+) for stickerification; an embedded HTTP/
-WebSocket server (Hummingbird or FlyingFox) serving a static SvelteKit build; Bonjour for
+WebSocket server (Hummingbird; FlyingFox is the fallback if Hummingbird's WebSocket support or
+bundle weight disappoints at P2 planning) serving a static SvelteKit build; Bonjour for
 `feedbax.local`; GRDB/SQLite for the queue; Developer ID + notarization for "download and
-double-click".
+double-click". Minimum deployment target: **macOS 14 (Sonoma)** — required by subject lifting
+and `CAMetalDisplayLink`.
 
 * *For:* Every hard requirement lands on a first-class API. Camera frames reach the GPU zero-copy
   (`CVMetalTextureCache` — the unified-memory win, material at 4K camera input). Multi-display is
@@ -102,7 +105,7 @@ the operator UI share state without IPC.
 The Swift core is also a stated learning vehicle — the maintainer intends to pick up Swift
 through this codebase — so the engine is written to teach: small modules, doc comments that
 explain *why*, no cleverness. That is the same property that keeps the extension points
-approachable.
+approachable. (This is a code-review convention, not a deliverable.)
 
 ---
 
@@ -125,8 +128,8 @@ flowchart LR
     end
     subgraph control["Control & modulation"]
       cv["ControlVector router\n9 slots · arbitration\n~100 ms smoothing"] --> core
-      audio["AudioAnalysis\n3 EQ bands → bumps\nwaveform buffers"] --> comp
-      audio --> cv
+      audio["AudioAnalysis\nEQ bands → waveforms\n3 bump modulators"] --> comp
+      audio --> core
       opui["Operator UI (SwiftUI)\nsliders · preview · queue"] --> cv
       local["Local input\nkeyboard · trackpad · gamepad"] --> cv
     end
@@ -162,8 +165,11 @@ Metal port renders to texture natively — step 5 is a pointer swap, not a copy.
 legacy risk.
 
 **Resolution/rate:** presets 720p → 8K (7680×4320) and 30–120 Hz, plus custom. Live re-size of
-the accumulator, as the original did. RGBA8 accumulator by default (parity — the original was
-8-bit); RGBA16F as a quality toggle where bandwidth allows.
+the accumulator; contents clear to the erase color on resize (the spec confirms live resize but
+not what the original did with the old contents — clear is the defined, testable choice). RGBA8
+accumulator by default (the original round-tripped every frame through the 8-bit window
+framebuffer, though its `fst` texture is declared `@type long` — verify effective depth during
+parity review); RGBA16F as a quality toggle where bandwidth allows.
 
 **8K feasibility, honestly:** an 8K RGBA8 surface is ~127 MB. With the warp+HSL fused into one
 pass and composite-in-place (no copy, ping-pong swap), a frame touches roughly 3 full surfaces
@@ -173,8 +179,9 @@ clears that bar with headroom for the camera and multi-display work Max couldn't
 
 **Multi-display:** the engine renders one canvas; each attached display gets a window +
 `CAMetalLayer` viewport with modes *mirror*, *span* (canvas partitioned across displays), or
-*crop* (each display frames a region). Per-display vsync via `CAMetalDisplayLink`. First pass
-ships mirror + span; the viewport abstraction is what matters now.
+*crop* (each display frames a region). Per-display vsync via `CAMetalDisplayLink`. Multi-display
+lands in P3, first as mirror + span, crop later; P1 ships one fullscreen display with the
+viewport abstraction already in place — the abstraction is what matters now.
 
 ---
 
@@ -183,6 +190,13 @@ ships mirror + span; the viewport abstraction is what matters now.
 Four small protocols, extracted from how the original actually routes data. Everything the party
 scenario adds later — depth sensors, more cameras, generative layers, new looks on the way in —
 is an implementation of one of these, not a change to the engine.
+
+All four receive a `FrameContext`: frame index, host time + delta, canvas resolution, the
+frame's `MTLCommandBuffer`, and a texture-pool allocator. Texture lifetime is pooled and
+per-frame: a filter renders into a pool-leased texture valid for the current frame only, and the
+*chain* (not the filter) owns the leases — an 8K chain cycles two pooled surfaces instead of
+allocating per filter. Chain intermediates are RGBA16F so unclamped stages (brcosa) carry
+out-of-range values into the next filter, matching Jitter's float pipeline.
 
 ### `SeedSource` — "a thing that produces imagery"
 
@@ -237,21 +251,25 @@ attaches to any source. Built-ins:
   runs on the Neural Engine, so it doesn't compete with the 8K loop for GPU bandwidth, and its
   masks arrive low-res and upsampled, which suits this instrument fine. Stills use subject
   lifting (any subject, higher quality), run once at decode and cached. Arbitrary-subject matting
-  on *live* video is heavier; it ships as a reduced-cadence mode (refresh the mask every N
-  frames) to experiment with.
+  on *live* video is heavier; it ships as a reduced-cadence mode (refresh the mask every 10–30
+  frames, tunable) to experiment with.
 * **`LumaKeyFilter` / `ChromaKeyFilter`** — the parity keyers (two-pass midtone cascade;
   HSV-weighted chroma), their strict either/or preserved as a UI rule on the camera chain, not
   as a chain limitation.
 * **`BrcosaFilter`** — the unclamped camera color stage (gated off by default, hot dial
   defaults 1.55/1.55/1.5, per spec §02 §7.2). The same filter *could* later be appended to the
   output chain to recover Sean's v122 output grade, but v1 ships without that (decision 13).
-* **`MatteOverlayFilter`** — the vignette matte, reading alpha (the fixed version, §6).
+* **`MatteOverlayFilter`** — the vignette matte, reading alpha (the fixed version, §6). Default
+  mask = full-alpha identity, so enabling it changes nothing until a shaped mask is chosen; lands
+  in P3 with the camera chain.
 * **`StickerBorderFilter`** — dilated white outline. `AutoMatte → StickerBorder` *is*
   "stickerify": the party upload path (§7) runs exactly this chain at ingest, so upload-time and
   live-time background removal are one implementation.
 
-Parity defaults per layer: camera = brcosa → keyer; sticker and movie = empty chain (file alpha
-passes straight through, as the original).
+Parity defaults per layer: camera = brcosa → matte overlay → keyer (the original's order, spec
+§02 §7.2–7.3); sticker and movie = empty chain (file alpha passes straight through, as the
+original). Note no P1 parity default runs a filter live — the camera chain arrives with P3
+(§10 spells out how P1 pins the filter implementations anyway).
 
 ### `ControlSurface` — "a thing a performer steers with"
 
@@ -260,6 +278,25 @@ panY, zoom, theta, [dead], saturation) with the documented per-slot range mappin
 owns: recompute-every-frame + diff-before-broadcast, the hard-cut arbitration between surfaces
 with a presence watchdog (Leap-style: tracked source primary, manual fallback after 2 s), global
 smoothing (100 ms ramp / 4 ms grain, both global knobs), and SInvert.
+
+```swift
+protocol ControlSurface: AnyObject {
+  var id: SurfaceID { get }
+  /// Every frame: the slots and toggles this surface currently asserts,
+  /// or nil to assert nothing (lets the arbitration watchdog fall through).
+  func poll(_ frame: FrameContext) -> ControlWrite?
+}
+/// A partial write: only the slots this surface asserts, plus discrete toggle events.
+struct ControlWrite {
+  var slots: [ControlSlot: Float]
+  var toggles: [ToggleEvent]   // SInvert, live/picture mode, bump enables, fullscreen…
+}
+```
+
+Toggles are discrete events, not smoothed values — they bypass the ramp and apply in arrival
+order (the original's hard cuts). The bindings table (surface input → slot or toggle, with its
+range map) is a versioned JSON resource loaded at startup and hot-reloadable — remapping an
+axis is data, not code.
 
 The performer's baseline is local hardware, present from P1 — the original gave the performer
 ~7 continuous axes plus booleans, and that must not wait for exotic surfaces:
@@ -274,17 +311,49 @@ The performer's baseline is local hardware, present from P1 — the original gav
   whole control vector with zero custom hardware.
 
 Later surfaces: touch (the two-role split the original used), hand tracking (the spec §04 Leap
-mapping ports directly), MIDI/OSC. Mappings live in a bindings table, not code — remapping an
-axis is data.
+mapping ports directly), MIDI/OSC — each is new rows in the bindings table.
 
 ### `Modulator` — "a signal that animates a parameter"
 
-A named scalar updated per frame, bindable to any modulatable parameter (quad-Z bump, waveform
-alpha, erase…). Built-ins: the three bass-band envelope followers (46.7 / 60 / 144.3 Hz biquads →
-rectify → asymmetric smooth → per-frame sample; *levels, not onset detectors*; default off, as
-the original). Later: camera presence/motion, depth proximity. The original had no LFOs and no
-idle drift — we keep that discipline; a party rig that "does something on its own" is a
-different instrument.
+```swift
+protocol Modulator: AnyObject {
+  var id: ModulatorID { get }
+  /// Called on the frame clock; the current level.
+  func sample(_ frame: FrameContext) -> Float
+}
+```
+
+A named scalar updated per frame, bindable (via the same bindings table) to any modulatable
+parameter — rendering parameters (quad-Z bump, waveform alpha, erase…), layer transforms, and
+control-vector slots. A slot or transform binding contributes an **additive offset** on top of
+the arbitrated surface value, outside the router's ~100 ms ramp — a modulator carries its own
+envelope dynamics (see the slides below), so nothing double-smooths, and offsets never
+participate in the hard-cut between surfaces.
+
+Built-ins are the three audio followers, matching spec §03/§04 exactly (*levels, not onset
+detectors*; default off, as the original):
+
+* **worldBump** — 144.3 Hz biquad → rectify (`abs`) → slide 2500/2500 (symmetric, despite the
+  original UI offering asymmetry) → per-frame sample; drives the quad-Z bump.
+* **waveBump** — reuses waveform 1's 46.7 Hz band ×2.2, per-frame mean, *no rectifier*; drives
+  waveform alpha.
+* **kittyBump** — same 46.7 Hz band, per-frame mean, then `abs` + slide 22/14 on the receiver
+  side; adds onto the sticker layer's transform — scale and Y placement — on top of the manual
+  controls. This is the original's audio-kick→sticker-bounce (spec §04 §1.3), easy to miss
+  because the follower lives patch-side and the slew webUI-side.
+
+(The 60 Hz band feeds waveform 2's display only — no follower runs on it.) Later: camera
+presence/motion, depth proximity. The original had no LFOs and no idle drift — we keep that
+discipline; a party rig that "does something on its own" is a different instrument.
+
+### Presets (P1)
+
+A preset is one JSON file: the 9-slot control vector, toggle states (SInvert, live/picture
+mode, bump enables), per-layer source selection (sticker index / movie path), `LayerTransform`,
+`LayerSettings`, and filter-chain parameters. Resolution/rate and display assignment are
+deliberately excluded — venue properties, kept in app settings. Save-current / recall from the
+operator UI; cold start still loads the original's defaults, untouched. §9's golden-frame
+scenarios are a preset plus a scripted control timeline plus a fixed clock.
 
 ---
 
@@ -304,17 +373,20 @@ end up in tests (§9):
 | 7 | SInvert negates zoom + offsets → point-mirror kaleidoscope; first-class toggle | §01 |
 | 8 | Draw order: seeds/waveforms under, warped past blended over | §01 |
 | 9 | Cold-start defaults: hue 0.02, lightness 0.5, sat 0.5 (nonzero, visually significant) | §01 |
-| 10 | Bumps are smoothed levels, default off; wave-2 alpha = base + envelope, unclamped | §03 |
+| 10 | Bumps are smoothed levels, default off; wave-2 alpha = base + envelope, unclamped; kittybump adds onto sticker scale/Y placement | §03/§04 |
 | 11 | Waveform 1: radial, bottom, thick burnt-orange; waveform 2: dotted cyan, `(srcα,dstα)` | §03 |
 | 12 | Parity default keeps keyers on the camera chain only; luma = two-pass midtone cascade; chroma HSV weights (4,1,2) | §02 |
 | 13 | Output brcosa: omitted in v1 (v123 parity — the stage is dead-wired in v123). `BrcosaFilter` ships anyway for the camera chain, so re-adding the v122 output grade later is appending that filter to the output chain. Low-risk: the v122 dials init to 1.0/1.0/1.0, an exact identity, so v122 topology at defaults renders pixel-identical to v123 | §01/§05 |
 | 14 | No LFOs, no idle animation, no auto-drift | §04 |
+| 15 | Waveform 2's default input is likely near-silent (default-silent gswitch upstream); verify against the running patch before pinning wave-2 golden frames, then port the *observed* behavior | §03 |
 
 Known original bugs we fix rather than port: the layer-enable last-writer race (becomes an OR),
 the RGB-luminance vignette that made the circular matte a no-op (read alpha), the duplicated
 uncoordinated chroma-key control sources (one source of truth), waveform-2's audio alpha
-clobbering the user's RGB (compose alpha only). Each is flagged in the extraction and spec audits
-as accidental.
+clobbering the user's RGB (compose alpha only). The enable race and the duplicated chroma
+controls are flagged in the audits as accidental; the vignette and the wave-2 clobber are
+flagged for verification rather than confirmed (spec §02 §6, §03 open q. 7) — we fix all four,
+and the parity review re-checks the result against archived footage.
 
 ---
 
@@ -342,13 +414,20 @@ sequenceDiagram
   nuance: `feedbax.local` resolves when the mini's Local Hostname is set to `feedbax` — a
   one-time setting the app's setup screen offers to apply. iPhones resolve `.local` natively;
   Android browsers often don't, so **the projected QR code always carries the numeric-IP URL**
-  and `feedbax.local` is the memorable alias, not the mechanism. Networkless parties: the mini
-  hosts its own Wi-Fi via Internet Sharing, or a pocket travel router; both documented in setup.
+  and `feedbax.local` is the memorable alias, not the mechanism. If :80 is already taken the
+  server falls back to :8080, and the QR carries whatever port is actually bound (the
+  `feedbax.local` alias is only clean on :80). Networkless parties: the mini hosts its own Wi-Fi
+  via Internet Sharing, or a pocket travel router; both documented in setup.
 * **Stickerification.** The upload path runs the same `AutoMatte → StickerBorder` filter chain
   the renderer uses (§5): Vision subject lifting produces the cutout, a dilated white border
   gives the sticker look. Uploads that are already transparent PNGs pass through untouched.
-  On-device, no cloud, fast on Apple silicon.
-* **Curation.** Guests are anonymous per-device IDs with a per-guest rate limit. The host and
+  On-device, no cloud, fast on Apple silicon. Accepted uploads: JPEG/PNG/HEIC up to 20 MB;
+  animated formats rejected in v1. The guest always sees the preview before the sticker enters
+  the queue; when subject lifting finds no subject, the upload ships un-matted (full rectangle +
+  border) — the preview makes that legible rather than surprising. Pipeline failures return a
+  friendly retry, never a silent drop.
+* **Curation.** Guests are anonymous per-device IDs with a per-guest rate limit (default 5
+  uploads per 10 minutes, curator-adjustable). The host and
   PIN-invited designees get the moderation view (approve/reject/pin/eject, auto-approve toggle —
   default *hold until approved*). The operator UI mirrors the same queue.
 * **Jukebox.** Approved stickers rotate through `StickerSource` on a fair queue (round-robin per
@@ -356,10 +435,14 @@ sequenceDiagram
   performer — or a presence modulator — can steer where new material lands.
 * **State.** SQLite via GRDB; media under Application Support per party session. A party is a
   named session you can reopen ("last Saturday's stickers").
+* **API contract.** The HTTP/WS surface (upload, moderation actions, queue events), the
+  designee-PIN mechanism, and the anonymous device-ID scheme are pinned as the first P2
+  planning task; `web/` and `Party/` both build against that contract, and §8's mock API
+  implements it.
 
 ### Guests affecting the rendering, comprehensibly
 
-Phase R1 needs no new hardware: the keyed camera already puts *your silhouette* into the feedback
+P3 (Room) needs no new hardware: the keyed camera already puts *your silhouette* into the feedback
 field (spec §02 — the most comprehensible mapping there is), and a motion-centroid modulator can
 stir pan/hue so movement visibly perturbs the attractor. Depth sensors and hand tracking slot in
 later as `Modulator`/`ControlSurface` implementations — the spec's Leap mapping is the template —
@@ -393,9 +476,12 @@ a mock API, in the daily SvelteKit toolchain.
 * **Shader math as pure functions.** Fold, rota, HSL-add, brcosa, both keyers implemented once in
   Metal and mirrored in a tiny CPU reference; unit tests pin them to hand-computed values,
   including fold reflection at the ±edges and hue wrap. This is where checklist §6 lives.
-* **Golden-frame tests.** Deterministic scenario scripts (fixed seed images, scripted control
-  vectors, fixed clock) → hash/compare rendered frames across commits. Catches "the look drifted"
-  without eyeballs.
+* **Golden-frame tests.** Deterministic scenario scripts — a preset file (§5) + a scripted
+  control timeline + a fixed clock — rendered and compared across commits with a per-pixel
+  tolerance (max channel delta ≤ 2/255 on ≥ 99.9 % of pixels) against references regenerated
+  per pinned OS/hardware baseline; exact hashes are too fragile across GPU/OS updates. Catches
+  "the look drifted" without eyeballs. Scenarios exist that attach the keyers/brcosa to a movie
+  layer, so the P1 filter implementations stay pinned before the camera exists (§10).
 * **Parity review.** Side-by-side v123 patch vs. port on the same inputs — human-judged, since
   Max-vs-Metal bit-equality isn't achievable or needed. Sean's archived stills are references.
 * **Party subsystem.** Vitest for the SvelteKit app; Swift tests for queue/moderation state
@@ -407,13 +493,18 @@ a mock API, in the daily SvelteKit toolchain.
 
 | Phase | Deliverable | Proves |
 |---|---|---|
-| **P1 — Parity instrument** | Feedbax.app: engine + per-layer filter chains (brcosa, keyers) + sticker folder + movie playback + mic waveforms/bumps + operator UI + keyboard/trackpad and gamepad surfaces + fullscreen + res/rate presets + still capture + minimal presets (save/recall current settings) | The look survives the port (checklist §6, golden frames); performable with stock hardware |
+| **P1 — Parity instrument** | Feedbax.app: engine + per-layer filter chains (brcosa, keyers) + sticker folder + movie playback + mic waveforms/bumps + operator UI + keyboard/trackpad and gamepad surfaces + fullscreen + res/rate presets + still capture + minimal presets (save/recall current settings) | The look survives the port (checklist §6, golden frames); performable with stock hardware; sustains 8K/60 for ≥ 10 min at parity defaults on a base M4 mini (p99 frame time < 16.7 ms, measured by a built-in frame-time HUD) |
 | **P2 — Party** | Embedded server, upload → stickerify → moderation → jukebox, QR overlay, sessions; `AutoMatteFilter` lands here (stills + movies) | The mini-at-a-party story end to end |
-| **P3 — Room** | CameraSource + live auto-matte + keying UI, presence/motion modulators, multi-display span | Guests affect rendering; Sean's unfinished multi-monitor wish |
-| **P4 — Reach** | Depth/hand tracking surfaces, MIDI/OSC, NDI/Syphon interop | The extension interfaces earn their keep |
+| **P3 — Room** | CameraSource + the live camera chain (brcosa · matte overlay · keyers) + keying UI, live auto-matte, presence/motion modulators, multi-display (mirror + span) | Guests affect rendering (checklist 12 end-to-end); Sean's unfinished multi-monitor wish |
+| **P4 — Reach** | Depth/hand tracking surfaces, MIDI/OSC, NDI/Syphon interop | Each lands as a `SeedSource`/`ControlSurface`/`Modulator` implementation with `app/Engine/` untouched |
 
 P1 is deliberately the whole *instrument*, not a tech demo — it replaces the Max patch for the
-solo performer before anything party-shaped exists.
+solo performer in picture/movie mode before anything party-shaped exists (the camera half of the
+original's either/or arrives in P3, matching how rarely camera was used in recent performance).
+The brcosa/keyer filter *implementations* land in P1, pinned by §9 unit tests and by
+golden-frame scenarios that attach them to a movie layer; no P1 parity default runs them live,
+and checklist 12's end-to-end camera parity is P3's to prove. Still capture = key-bound PNG
+snapshot of the accumulator at canvas resolution into `~/Pictures/Feedbax/`.
 
 ---
 
