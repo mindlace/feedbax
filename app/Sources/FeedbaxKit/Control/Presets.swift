@@ -6,7 +6,7 @@ import simd
 /// display assignment are deliberately NOT here: those are venue properties, set once for a
 /// space rather than performed, and Task 22's golden scenarios need them stable across every
 /// preset a scenario cycles through.
-public struct Preset: Codable, Equatable {
+public struct Preset: Equatable {
   public var name: String
   /// The 9 raw (unmapped) control-vector values, `ControlSlot.rawValue`-indexed — same shape
   /// as `ControlRouter.rawSlots`/`ControlRouter.startupVector` (spec §04 §1.1).
@@ -14,14 +14,50 @@ public struct Preset: Codable, Equatable {
   public var eraseControl: Float
   public var toggles: PresetToggles
   public var layers: [PresetLayer]
+  /// `Engine.LayerMode`'s persisted form ("sticker" or "movie") — the either-or picture/movie
+  /// switch (design §5). Post-hoc Task 19 fix: this field didn't exist when `Preset` was first
+  /// designed (Task 12), so `Engine.capturePreset`/`applyPreset` silently dropped layer mode
+  /// on every save/recall. A plain `String`, not `Engine.LayerMode` itself: `Control/` (this
+  /// file) has no dependency on `Engine/`, and a string degrades gracefully (see `init(from:)`)
+  /// instead of failing to decode a whole preset over one unrecognized future mode.
+  public var layerMode: String
 
   public init(name: String, slots: [Float], eraseControl: Float, toggles: PresetToggles,
-              layers: [PresetLayer]) {
+              layers: [PresetLayer], layerMode: String = "sticker") {
     self.name = name
     self.slots = slots
     self.eraseControl = eraseControl
     self.toggles = toggles
     self.layers = layers
+    self.layerMode = layerMode
+  }
+}
+
+extension Preset: Codable {
+  private enum CodingKeys: String, CodingKey { case name, slots, eraseControl, toggles, layers, layerMode }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    name = try c.decode(String.self, forKey: .name)
+    slots = try c.decode([Float].self, forKey: .slots)
+    eraseControl = try c.decode(Float.self, forKey: .eraseControl)
+    toggles = try c.decode(PresetToggles.self, forKey: .toggles)
+    layers = try c.decode([PresetLayer].self, forKey: .layers)
+    // `decodeIfPresent`, not `decode`: every preset saved before this fix has no `layerMode`
+    // key at all. Defaulting to "sticker" — `Engine.layerMode`'s own cold-start default —
+    // means an old preset file keeps loading instead of throwing, and recalls into the same
+    // mode a fresh `Engine` starts in.
+    layerMode = try c.decodeIfPresent(String.self, forKey: .layerMode) ?? "sticker"
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(name, forKey: .name)
+    try c.encode(slots, forKey: .slots)
+    try c.encode(eraseControl, forKey: .eraseControl)
+    try c.encode(toggles, forKey: .toggles)
+    try c.encode(layers, forKey: .layers)
+    try c.encode(layerMode, forKey: .layerMode)
   }
 }
 

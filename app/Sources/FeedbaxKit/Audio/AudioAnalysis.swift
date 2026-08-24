@@ -40,6 +40,19 @@ public final class AudioBands {
   /// running patch and update this default once confirmed (carried to Task 25 per the plan).
   public var wave2InputGain: Float = 0.0
 
+  /// Guards every stored property below. `AudioAnalysis.handle(_:)` calls `ingest` from the
+  /// realtime audio-input-tap thread (`AVAudioEngine` installs the tap callback on its own
+  /// render thread, never the caller's), while `Engine.step` calls `frameValues` from the
+  /// main/display-link thread — both read AND write the same biquad/slide/running-average/
+  /// ring-buffer state, with no synchronization that would otherwise exist. Left unguarded,
+  /// that's a genuine data race (Swift's exclusivity enforcement can trap with "Simultaneous
+  /// accesses to a variable" the moment the two threads overlap on the same stored property).
+  /// A plain lock is sufficient here rather than a lock-free handoff: both critical sections
+  /// are short and allocation-free (bounded by `samples.count` and `framesize`/downsample
+  /// respectively), so contention is brief and doesn't risk the kind of priority-inversion
+  /// stall a longer or blocking critical section would on the realtime thread.
+  private let lock = NSLock()
+
   private var wave1Biquad: Biquad
   private var wave2Biquad: Biquad
   private var worldBumpBiquad: Biquad
@@ -84,6 +97,8 @@ public final class AudioBands {
   /// Mic tap or test injection — `AudioAnalysis` is the only caller that means "mic tap";
   /// tests call this directly with synthetic buffers.
   public func ingest(_ samples: [Float]) {
+    lock.lock()
+    defer { lock.unlock() }
     for s in samples {
       // worldBump (spec §03 §7a): biquad → abs → slide(2500/2500) → runningAvg(absolute,100).
       // The running average's *last* value is what `frameValues()` snapshots — this is
@@ -113,6 +128,8 @@ public final class AudioBands {
   /// audiobang cadence). Resets the wave/kitty since-last-frame accumulators — `avg~`'s
   /// bang-triggered reset semantics.
   public func frameValues() -> FrameAudio {
+    lock.lock()
+    defer { lock.unlock() }
     let worldBump = worldBumpSnapshot * 0.05
 
     let waveBumpRaw = waveBumpCount > 0 ? waveBumpSum / Float(waveBumpCount) : 0

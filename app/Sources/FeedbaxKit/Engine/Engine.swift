@@ -10,6 +10,16 @@ import simd
 public enum LayerMode: Equatable {
   case sticker
   case movie
+
+  /// `Preset.layerMode`'s persisted form (Task 19 fix — presets didn't capture/restore this
+  /// at all until now). A plain string round trip, not `RawRepresentable`, so a preset file
+  /// from a future build with a mode this one doesn't know degrades to `.sticker` on decode
+  /// (`fromPresetIdentifier`'s fallback) instead of failing the whole preset load.
+  public var presetIdentifier: String { self == .sticker ? "sticker" : "movie" }
+
+  public static func fromPresetIdentifier(_ raw: String) -> LayerMode {
+    raw == "movie" ? .movie : .sticker
+  }
 }
 
 /// The assembled instrument (Task 19): owns every piece built in Tasks 1–18 and wires them
@@ -115,7 +125,17 @@ public final class Engine {
   /// explicitly once construction succeeds, the same way `EngineTests` does, so a caller that
   /// wants a bare-zero router (a unit test isolating one piece of behavior) isn't forced
   /// through the startup vector first.
-  public init(context: MetalContext) throws {
+  ///
+  /// `audioSampleRate` is the rate `AudioBands`' biquads are tuned for — it must match
+  /// whatever rate samples actually arrive at, or the fixed-Hz bandpass filters (46.7/60.0/
+  /// 144.3 Hz, spec §03 §3) select the wrong band entirely. Spec §03 §2 targets 48 kHz mono,
+  /// the default here; a caller with a real input device (`feedbax-dev/main.swift`) should
+  /// query that device's actual native rate BEFORE constructing `Engine` and pass it in —
+  /// there is no reconciliation path AFTER construction (an earlier version of this comment
+  /// claimed `AudioAnalysis` reconstructs `AudioBands` internally at the hardware rate; it
+  /// does not — `AudioAnalysis.init(bands:)` takes an already-built `AudioBands` and never
+  /// replaces it).
+  public init(context: MetalContext, audioSampleRate: Float = 48000) throws {
     self.context = context
     let format = Engine.accumulatorFormat
     let size = Engine.defaultResolution
@@ -123,10 +143,7 @@ public final class Engine {
 
     self.core = try FeedbackCore(context: context, size: size, format: format)
     self.compositor = Compositor(quad: try QuadRenderer(context: context, pixelFormat: format))
-    // Spec §03 §2 targets 48 kHz mono; a live `AudioAnalysis` (app-layer only, see the type
-    // doc above) reconstructs `AudioBands` at the input hardware's actual reported rate if it
-    // ever differs — this is the deterministic-test/cold-start default.
-    self.bands = AudioBands(sampleRate: 48000)
+    self.bands = AudioBands(sampleRate: audioSampleRate)
     self.waveforms = try WaveformRenderer(context: context, pixelFormat: format)
 
     // Sticker folder: `input/transparent-background/` resolved against the CURRENT WORKING
@@ -160,13 +177,18 @@ public final class Engine {
     // 1. Sample audio once per frame — the ctrlbang/audiobang cadence (spec §03 §7): every
     // downstream consumer this frame (the world bump, the two waveforms, the kitty offset)
     // reads from this SAME snapshot, not three independently-timed samples.
-    let audio = bands.frameValues()
+    var audio = bands.frameValues()
 
     // 2. Router → smoothed, mapped `RenderParams`, then the world-bump gate. All three bump
     // gates default off (spec §03 §7/§10); a disabled gate contributes exactly 0, not a
     // damped-toward-zero value — there's no partial bump.
     var params = router.tick(at: time)
     params.worldBump = bumpsEnabled.world ? audio.worldBump : 0
+    // waveBump gates the same way, mirrored onto the audio snapshot itself (rather than a
+    // local passed separately) because `waveforms.draw` below reads `audio.waveBumpRaw`
+    // directly for wave 2's alpha pulse (spec §03 §6) — zeroing it here, once, is what keeps
+    // that draw call from needing its own gate check.
+    audio.waveBumpRaw = bumpsEnabled.wave ? audio.waveBumpRaw : 0
 
     // 3. Kitty offset: an ADDITIVE, non-persistent modulator contribution on top of the
     // sticker layer's manual transform (design §5's Modulator rule; spec §04 §1.3) — it
@@ -277,6 +299,7 @@ public final class Engine {
     // Sticker/movie `.enabled` are kept in lockstep by `handle(.layerEnabled:)` above, so
     // either one reads the same single logical flag.
     preset.toggles.layerEnabled = sticker.layer.enabled
+    preset.layerMode = layerMode.presetIdentifier
     preset.layers = preset.layers.map { layer in
       var layer = layer
       if layer.id == sticker.id {
@@ -296,6 +319,7 @@ public final class Engine {
   /// can't reach — the same gap `capturePreset` closes on the way out.
   public func applyPreset(_ preset: Preset, at time: TimeInterval) {
     PresetStore.apply(preset, router: router, layers: [sticker, movie], at: time)
+    layerMode = LayerMode.fromPresetIdentifier(preset.layerMode)
     bumpsEnabled = (world: preset.toggles.worldBump, wave: preset.toggles.waveBump,
                     kitty: preset.toggles.kittyBump)
     waveforms.wave1Enabled = preset.toggles.wave1

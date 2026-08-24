@@ -61,7 +61,19 @@ public final class MetalHostView: NSView {
   public override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     syncDrawableSize()
-    guard window != nil, clock == nil else { return }
+    guard window != nil else {
+      // The view was removed from its window (or never had one) — a live `CAMetalDisplayLink`
+      // is retained by the run loop it's attached to, NOT by anything that goes away just
+      // because this view does, so without an explicit `invalidate()` here it keeps firing
+      // and holding this view/`Engine` alive forever (the leak the review flagged). `deinit`
+      // below is a second, final backstop for the case where this view is deallocated without
+      // `viewDidMoveToWindow(nil)` ever running first.
+      clock?.invalidate()
+      clock = nil
+      outputStage = nil
+      return
+    }
+    guard clock == nil else { return }
     // `FrameClock`/`OutputStage` both need a real window/screen (the display link attaches to
     // the layer's eventual display) — deferred until the view is actually in a window, not
     // built in `init`.
@@ -69,6 +81,16 @@ public final class MetalHostView: NSView {
     clock = FrameClock(layer: metalLayer, rate: engine.frameRate) { [weak self] update in
       self?.renderFrame(update)
     }
+    // `swift run`'s unbundled executable (no Info.plist/nib) doesn't hand out first-responder
+    // status automatically the way a bundled app's window does — without this, `keyDown`/
+    // `scrollWheel`/`magnify`/`mouseDragged` above never fire at all, because nothing is ever
+    // asked to become key/first-responder for the window (review item: "keyboard likely never
+    // reaches MetalHostView").
+    window?.makeFirstResponder(self)
+  }
+
+  deinit {
+    clock?.invalidate()
   }
 
   public override func setFrameSize(_ newSize: NSSize) {
@@ -123,21 +145,45 @@ public final class MetalHostView: NSView {
     surface.keyDown(chars)
   }
 
+  /// Empty on purpose. AppKit only continues sending this view `mouseDragged`/`mouseUp` for a
+  /// click-drag gesture that started with a `mouseDown` THIS view was actually offered — for
+  /// an `NSView` hosted through SwiftUI's `NSViewRepresentable` (as `MetalHostView` is), the
+  /// hosting layer can end up treating an unhandled `mouseDown` as unclaimed and never routes
+  /// the drag here at all. Overriding it (even as a no-op — there is nothing to do on press
+  /// itself, only on the drag in `mouseDragged` below) is what makes this view the recognized
+  /// target for the rest of the gesture (review item: "option-drag hue/theta currently dead").
+  public override func mouseDown(with event: NSEvent) {}
+
   /// Two-finger trackpad scroll — the original's shader-pan touch role (design §5).
+  ///
+  /// Normalization: `NSEvent.scrollingDeltaX/Y` are raw POINTS, and a single fast-swipe event
+  /// can report 5–40 pts — fed straight into `KeyboardTrackpadSurface.accumulate`'s ±1 range
+  /// at the bundled default sensitivity (1.0, `DefaultBindings.json`), that slams the pan
+  /// accumulator to its clamp in one event instead of gliding across a gesture. Dividing by
+  /// the view's own height (documented factor, chosen over an arbitrary sensitivity constant
+  /// because it scales with window size automatically) turns "drag the full height of the
+  /// preview" into "drive the axis across its whole −1...1 range" — a gesture-length feel
+  /// `KeyboardTrackpadSurface` itself can't provide, since it's deliberately Metal/AppKit-free
+  /// and has no visibility into view geometry (`ControlSurface`'s own doc comment on that
+  /// narrowing, ControlVector.swift).
   public override func scrollWheel(with event: NSEvent) {
-    surface.scroll(dx: Float(event.scrollingDeltaX), dy: Float(event.scrollingDeltaY))
+    let norm = Float(max(bounds.height, 1))
+    surface.scroll(dx: Float(event.scrollingDeltaX) / norm, dy: Float(event.scrollingDeltaY) / norm)
   }
 
-  /// Pinch/magnify gesture.
+  /// Pinch/magnify gesture. `NSEvent.magnification` is already a small per-event ratio (not
+  /// raw points the way scroll/drag deltas are), so it does not need the same normalization.
   public override func magnify(with event: NSEvent) {
     surface.magnify(Float(event.magnification))
   }
 
   /// Option-held drag: x → hue, y → theta (`KeyboardTrackpadSurface.modifiedDrag`'s mapping).
   /// Plain (non-option) drags are intentionally NOT forwarded — this view has no click-drag
-  /// role of its own in P1.
+  /// role of its own in P1. Same view-height normalization as `scrollWheel` above, and for the
+  /// same reason: `event.deltaX`/`deltaY` are raw points.
   public override func mouseDragged(with event: NSEvent) {
     guard event.modifierFlags.contains(.option) else { return }
-    surface.modifiedDrag(dx: Float(event.deltaX), dy: Float(event.deltaY))
+    let norm = Float(max(bounds.height, 1))
+    surface.modifiedDrag(dx: Float(event.deltaX) / norm, dy: Float(event.deltaY) / norm)
   }
 }
