@@ -54,6 +54,19 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     .hue: 0, .bias: 0, .panX: 0, .panY: 0, .zoom: 0, .theta: 0, .saturation: 0,
   ]
 
+  /// The 7 slots a slider actually controls — `.scalebright`/`.nc` are dead (ControlVector.swift)
+  /// and never get a mirror entry. Shared by `init` (seeds from `engine.router.rawSlots`) and
+  /// `recallPreset` (seeds from `preset.slots`) — both are a raw 9-float array indexed by
+  /// `ControlSlot.rawValue` (`ControlRouter.rawSlots`'s own doc comment; `Preset.slots`' doc
+  /// comment says the same), so one conversion serves both call sites.
+  private static let liveSlots: [ControlSlot] = [.hue, .bias, .panX, .panY, .zoom, .theta, .saturation]
+
+  private static func sliderMirror(from rawSlots: [Float]) -> [ControlSlot: Double] {
+    var mirror: [ControlSlot: Double] = [:]
+    for slot in liveSlots { mirror[slot] = Double(rawSlots[slot.rawValue]) }
+    return mirror
+  }
+
   /// Called by a slider drag (or a test). Queues the write for the next `poll` and updates the
   /// mirror immediately — the mirror must not wait for a router round trip, or the slider
   /// would visibly lag the hand dragging it.
@@ -217,6 +230,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     guard let engine, let presetStore, let preset = try? presetStore.load(name: name) else { return }
     engine.applyPreset(preset, at: CACurrentMediaTime())
     presetName = preset.name
+    sliderValues = Self.sliderMirror(from: preset.slots)
     layerMode = engine.layerMode
     eraseValue = Double(engine.router.eraseControl)
     stickerIndex = engine.sticker.selectedIndex
@@ -252,8 +266,14 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     if let engine {
       // Seed every mirror from the live engine's actual starting state, rather than this
       // class's own arbitrary defaults — `applyStartupDefaults` (called by `main.swift` before
-      // this init) already put `router`/`sticker` in their real cold-start state, and the panel
-      // should show that, not zeroes.
+      // this init) already put `router`/`sticker`/`waveforms` in their real cold-start state,
+      // and the panel should show that, not zeroes or this class's own guessed rest values.
+      // (Review finding: this loop was previously missing `sliderValues` and the toggle
+      // mirrors entirely, so the 7 sliders rendered at zero while the engine was already
+      // running the non-zero startup vector, and the toggle switches only "worked" by
+      // coincidentally matching `ToggleEvent`'s own defaults — which drifts the moment either
+      // side's default changes.)
+      sliderValues = Self.sliderMirror(from: engine.router.rawSlots)
       layerMode = engine.layerMode
       eraseValue = Double(engine.router.eraseControl)
       resolution = engine.resolution
@@ -261,6 +281,14 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
       stickerIndex = engine.sticker.selectedIndex
       stickerItemCount = engine.sticker.itemCount
       engine.sticker.onCountChanged = { [weak self] count in self?.stickerItemCount = count }
+
+      sInvertOn = engine.router.sInvert < 0   // `sInvert` is ±1 (ControlRouter's own doc comment)
+      layerOn = engine.sticker.layer.enabled  // sticker/movie kept in lockstep (Engine.handle)
+      wave1On = engine.waveforms.wave1Enabled
+      wave2On = engine.waveforms.wave2Enabled
+      worldBumpOn = engine.bumpsEnabled.world
+      waveBumpOn = engine.bumpsEnabled.wave
+      kittyBumpOn = engine.bumpsEnabled.kitty
     }
     if presetStore != nil { refreshPresetList() }
   }
