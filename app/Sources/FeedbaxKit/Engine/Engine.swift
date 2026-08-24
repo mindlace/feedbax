@@ -276,16 +276,15 @@ public final class Engine {
     case .fullscreen:
       break   // one-shot UI action — `PreviewView` (fullscreen)
     case .stillCapture:
-      // Task 21: write the current accumulator to ~/Pictures/Feedbax/ as a dated PNG.
-      // This happens asynchronously and failures are logged, never crash the render loop.
+      // Task 21: write the last completed frame to ~/Pictures/Feedbax/ as a dated PNG.
+      // Synchronous by design: readPixels → waitUntilCompleted → CGImage write. A keypress
+      // capture may hitch ~one frame, acceptable for this one-shot action. Async would race
+      // the ping-pong accumulator reuse (FeedbackCore's double-buffer flips next frame, so an
+      // in-flight async blit could read overwritten data). Failures logged, never crash.
       do {
-        let defaultDir = FileManager.default.urls(for: .picturesDirectory,
-                                                  in: .userDomainMask)[0]
-          .appendingPathComponent("Feedbax")
-        _ = try StillCapture.write(core.accumulator, context: context, directory: defaultDir,
+        _ = try StillCapture.write(core.accumulator, context: context, directory: nil,
                                    date: Date())
       } catch {
-        // Log failure but don't crash the render loop (design §10, spec §04 §6).
         print("Still capture failed: \(error)")
       }
     case .sInvert:

@@ -20,7 +20,8 @@ public struct StillCapture {
     // Convert the float SIMD4<Float> pixels to a CGImage (rgba8Unorm).
     let cgImage = try pixelsToCGImage(pixels, width: texture.width, height: texture.height)
 
-    // Determine the output directory.
+    // Determine the output directory. The fallback to ~/Pictures/Feedbax/ is exercised only
+    // via the live keypress path (Engine.handle); tests always pass an explicit temp directory.
     let outputDir = directory ?? FileManager.default.urls(for: .picturesDirectory,
                                                           in: .userDomainMask)[0]
                       .appendingPathComponent("Feedbax")
@@ -29,6 +30,7 @@ public struct StillCapture {
     try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
 
     // Format the date as YYYY-MM-dd-HHmmss using POSIX locale for determinism.
+    // Local time is deliberate — wall-clock capture names match the original's screencapture behavior.
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.dateFormat = "yyyy-MM-dd-HHmmss"
