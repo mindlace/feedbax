@@ -1,0 +1,11 @@
+name: Feedbax
+options: { bundleIdPrefix: net.mindlace, deploymentTarget: { macOS: "14.0" } }
+packages: { FeedbaxKit: { path: . } }
+targets:
+  Feedbax:
+    type: application
+    platform: macOS
+    sources: [App]
+    dependencies: [{ package: FeedbaxKit, product: FeedbaxKit }]
+    info: { path: App/Info.plist, properties: { NSMicrophoneUsageDescription: "Feedbax listens to the room to draw waveforms and bass bumps." } }
+    entitlements: { path: App/Feedbax.entitlements, properties: { com.apple.security.device.audio-input: true } }
