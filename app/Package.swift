@@ -7,7 +7,7 @@ let package = Package(
   targets: [
     .target(
       name: "FeedbaxKit",
-      resources: [.process("Shaders"), .copy("Control/DefaultBindings.json")]
+      resources: [.copy("Shaders"), .copy("Control/DefaultBindings.json")]
     ),
     .executableTarget(name: "feedbax-dev", dependencies: ["FeedbaxKit"]),
     .testTarget(
