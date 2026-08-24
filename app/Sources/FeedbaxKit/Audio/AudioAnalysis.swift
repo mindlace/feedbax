@@ -23,8 +23,11 @@ public struct FrameAudio {
   /// (spec §03 §4).
   public var wave1Points: [Float]
   /// Wave-2 ring (1024 samples) downsampled ×512 → 2 points, unsmoothed (spec §03 §4 — wave
-  /// 2's matrix reaches its graph "unsmoothed"). Anomalously coarse; flagged `[?]` in the
-  /// spec (§03 §12 q.2), left for Task 25 to verify against the running patch.
+  /// 2's matrix reaches its graph "unsmoothed"). Anomalously coarse relative to wave 1's ×2 —
+  /// verified against the running patch (Task 25): with wave 2 enabled alone and no other
+  /// change, muting the mic entirely and playing a loud transient both left the rendered
+  /// shape unchanged, consistent with the coarse-decimation/near-silent-input reading rather
+  /// than a dense audio-reactive line.
   public var wave2Points: [Float]
 }
 
@@ -33,11 +36,16 @@ public struct FrameAudio {
 /// `AudioAnalysis` (below) is the only piece that actually touches `AVAudioEngine`.
 public final class AudioBands {
   /// Checklist #15 (spec §03 §3, §12 q.8 — "the single highest-impact unresolved item in
-  /// this file for a port"): wave 2's input in the original is very likely near-silent by
-  /// default, because its EQ's cold-inlet multiplier is signal-patched from a duplicate
-  /// `gswitch` whose default-selected candidate is itself unconnected. The port defaults
-  /// this gain to 0.0 (silent) rather than guessing a nonzero value; verify against the
-  /// running patch and update this default once confirmed (carried to Task 25 per the plan).
+  /// this file for a port"): wave 2's input in the original is near-silent by default,
+  /// because its EQ's cold-inlet multiplier is signal-patched from a duplicate `gswitch`
+  /// whose default-selected candidate is itself unconnected. **Verified live against
+  /// `patches/Feedbax.maxpat` (Task 25, 2026-08-24):** with wave 2 enabled alone (wave 1
+  /// disabled) and DSP/mic running, (a) muting `adc~` entirely produced zero visible change
+  /// in wave 2's rendered shape, and (b) a loud transient (system chime played through the
+  /// speakers into the mic) produced no reactivity beyond ordinary render-loop jitter — both
+  /// consistent with a near-zero effective input multiplier. The 0.0 default is confirmed
+  /// correct, not a guess. Reviving wave 2 (a nonzero gain) is an operator tunable for a port,
+  /// not a parity requirement — the original's default *is* silent.
   public var wave2InputGain: Float = 0.0
 
   /// Guards every stored property below. `AudioAnalysis.handle(_:)` calls `ingest` from the

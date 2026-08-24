@@ -385,7 +385,7 @@ end up in tests (§9):
 | 12 | Parity default keeps keyers on the camera chain only; luma = two-pass midtone cascade; chroma HSV weights (4,1,2) | §02 |
 | 13 | Output brcosa: omitted in v1 (v123 parity — the stage is dead-wired in v123). `BrcosaFilter` ships anyway for the camera chain, so re-adding the v122 output grade later is appending that filter to the output chain. Low-risk: the v122 dials init to 1.0/1.0/1.0, an exact identity, so v122 topology at defaults renders pixel-identical to v123 | §01/§05 |
 | 14 | No LFOs, no idle animation, no auto-drift | §04 |
-| 15 | Waveform 2's default input is likely near-silent (default-silent gswitch upstream); verify against the running patch before pinning wave-2 golden frames, then port the *observed* behavior | §03 |
+| 15 | **Verified** (Task 25, live `Feedbax.maxpat`, Max 9.1.5): waveform 2's default input is silent — enabling wave 2 alone, muting `adc~` entirely and separately playing a loud transient both left its rendered shape unchanged. Port keeps `wave2InputGain = 0.0`; reviving wave 2 is an operator tunable, not a parity requirement. Also settles §12 q.2: no observation contradicts the coarse `downsample=512` (→ 2 points) reading, so `WaveBuffer`'s wave-2 decimation is unchanged | §03 |
 
 Known original bugs we fix rather than port: the layer-enable last-writer race (becomes an OR),
 the RGB-luminance vignette that made the circular matte a no-op (read alpha), the duplicated

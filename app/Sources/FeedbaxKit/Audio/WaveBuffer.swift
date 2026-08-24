@@ -35,8 +35,10 @@ struct WaveBuffer {
 
   /// Ports `jit.catch~`'s `@downsample` (spec §03 §4): keep every `stride`-th sample of the
   /// chronological snapshot. `stride` 2 → 512 points (wave 1); `stride` 512 → 2 points (wave
-  /// 2 — anomalously coarse, flagged `[?]` in the spec and left for Task 25 to verify, spec
-  /// §03 §12 q.2).
+  /// 2 — anomalously coarse next to wave 1's ×2). Verified against the running patch (Task
+  /// 25, spec §03 §12 q.2): wave 2's rendered shape did not change under a full-mic-mute or
+  /// loud-transient A/B test, consistent with this coarse decimation rather than a dense
+  /// audio-reactive line — left as-is, no contradicting observation.
   func strideDecimated(by stride: Int) -> [Float] {
     let full = chronological()
     guard stride > 0 else { return full }

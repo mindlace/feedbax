@@ -61,8 +61,8 @@ final class AudioAnalysisTests: XCTestCase {
     bands.ingest(sine(46.7, seconds: 0.1, sampleRate: 48000, amplitude: 0.5))
     let f = bands.frameValues()
     XCTAssertEqual(f.wave1Points.count, 512, "framesize 1024 / downsample 2")
-    XCTAssertEqual(f.wave2Points.count, 2, "downsample 512 — flagged [?], Task 25")
-    XCTAssertEqual(f.wave2Points[0], 0, accuracy: 1e-5, "wave2 input silent by default (checklist #15)")
+    XCTAssertEqual(f.wave2Points.count, 2, "downsample 512 — verified against the running patch (Task 25): wave 2 stayed static/non-reactive under a full-mic-mute and loud-transient A/B test, consistent with a coarse 2-point decimation rather than a dense line")
+    XCTAssertEqual(f.wave2Points[0], 0, accuracy: 1e-5, "wave2 input silent by default (checklist #15) — confirmed live in Feedbax.maxpat: muting adc~ entirely produced zero visible change in wave 2's rendered shape, and a loud transient produced no reactivity beyond baseline render jitter")
   }
   func testKittyReceiverRectifiesAndSlews() {
     let r = KittyBumpReceiver()
