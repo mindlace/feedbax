@@ -407,7 +407,7 @@ a mock API, in the daily SvelteKit toolchain.
 
 | Phase | Deliverable | Proves |
 |---|---|---|
-| **P1 — Parity instrument** | Feedbax.app: engine + per-layer filter chains (brcosa, keyers) + sticker folder + movie playback + mic waveforms/bumps + operator UI + keyboard/trackpad and gamepad surfaces + fullscreen + res/rate presets + still capture | The look survives the port (checklist §6, golden frames); performable with stock hardware |
+| **P1 — Parity instrument** | Feedbax.app: engine + per-layer filter chains (brcosa, keyers) + sticker folder + movie playback + mic waveforms/bumps + operator UI + keyboard/trackpad and gamepad surfaces + fullscreen + res/rate presets + still capture + minimal presets (save/recall current settings) | The look survives the port (checklist §6, golden frames); performable with stock hardware |
 | **P2 — Party** | Embedded server, upload → stickerify → moderation → jukebox, QR overlay, sessions; `AutoMatteFilter` lands here (stills + movies) | The mini-at-a-party story end to end |
 | **P3 — Room** | CameraSource + live auto-matte + keying UI, presence/motion modulators, multi-display span | Guests affect rendering; Sean's unfinished multi-monitor wish |
 | **P4 — Reach** | Depth/hand tracking surfaces, MIDI/OSC, NDI/Syphon interop | The extension interfaces earn their keep |
@@ -419,11 +419,7 @@ solo performer before anything party-shaped exists.
 
 ## 11. Open questions
 
-1. **Mac-only lock-in** — the recommendation buys fidelity and app-ness with portability. Any
-   future scenario (a Linux gallery box?) that should veto Option A?
-2. **Name** — does the reimplementation stay "Feedbax"?
-3. **Minimal presets** — the original had none; a "save current settings" is nearly free in P1.
-   Include?
+None currently.
 
 ### Resolved
 
@@ -434,6 +430,13 @@ solo performer before anything party-shaped exists.
   with auto-stickerification (`AutoMatteFilter`) as the flagship filter.
 * **Baseline local input** (2026-08-23): keyboard/trackpad and game-controller surfaces are P1
   deliverables covering the ~7 axes + booleans; exotic surfaces are additive.
+* **Mac-only lock-in** (2026-08-24): committed. No deployment scenario vetoes Swift+Metal; the
+  party layer stays portable by nature (any phone browser reaches the embedded server).
+* **Name** (2026-08-24): stays **Feedbax** — continuity with Sean's instrument. The app is
+  Feedbax.app; the party host is `feedbax.local`.
+* **Minimal presets** (2026-08-24): yes, in P1 — snapshot the control vector + layer/filter
+  params to a file, recall on demand. Doubles as reproducible state for golden-frame tests.
+  Cold-start defaults remain the untouched load state, as the original.
 * **Output brcosa** (2026-08-24): omitted in v1 rather than shipped as a toggle. Verified in the
   patch JSON that the v122 output-side dials initialize to 1.0/1.0/1.0 — an exact identity
   through the brcosa math — so the v122/v123 looks only diverge once a performer moves a dial.
