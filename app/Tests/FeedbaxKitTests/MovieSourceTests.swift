@@ -39,6 +39,38 @@ final class MovieSourceTests: XCTestCase {
                          "red sweep must advance — the movie plays on its own clock (design §5)")
   }
 
+  /// Guards the double-attach risk a code-review pass caught: `AVPlayerLooper`'s queue wraps
+  /// every ~0.4 s (the fixture's own duration), so 1.1 s of continuous ticking crosses at
+  /// least two loop boundaries — two re-attaches of `output` to a new `currentItem`. Per
+  /// Apple's documented single-attachment contract, skipping the detach-before-attach in
+  /// `tick` risks `-[AVPlayerItem addOutput:]`'s documented "Cannot attach an output that is
+  /// already attached" exception (an uncatchable `NSException`, not a Swift `Error` — a
+  /// regression here would abort the whole test run, not just fail one case). Note: a
+  /// deliberate stress attempt (temporarily reverting the detach fix, running up to 3.5 s /
+  /// ~8 loop wraps) did not actually reproduce that exception on this SDK/OS — so treat this
+  /// test as exercising the documented-contract risk and the "no crash, no nil" outcome, not
+  /// as proof the exception is reachable here. Loose on purpose, per the task's timing
+  /// contract: no assertion on which frame/loop iteration is current, only that `tick` keeps
+  /// returning a texture throughout.
+  func testTickSurvivesMultipleLoopBoundaries() throws {
+    let ctx = try MetalContext()
+    let src = MovieSource(context: ctx)
+    src.load(url: fixtureURL)
+    _ = try XCTUnwrap(firstFrame(src, ctx), "player produced no frame within 2 s")
+
+    let end = Date().addingTimeInterval(1.1)          // > 2 loop boundaries at ~0.4 s/loop
+    var tickCount = 0
+    while Date() < end {
+      let cb = ctx.queue.makeCommandBuffer()!
+      let frame = FrameContext(index: 0, time: 0, delta: 1 / 60, canvasSize: SIMD2(64, 64),
+                               commandBuffer: cb, pool: ctx.pool)
+      XCTAssertNotNil(src.tick(frame), "tick must keep returning a texture across loop boundaries")
+      tickCount += 1
+      RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    }
+    XCTAssertGreaterThan(tickCount, 10, "sanity: this actually polled repeatedly across the loop window")
+  }
+
   /// `id`/`layer`/`transform` defaults, plus the AVPlayer-not-yet-loaded state — no real
   /// playback involved, so this is deterministic (unlike the timing test above).
   func testDefaultsMatchSeedSourceConventions() throws {

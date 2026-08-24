@@ -68,9 +68,11 @@ public final class MovieSource: SeedSource {
   /// Starts looped playback of `url` immediately — decode-on-selection for movies means
   /// "start the player," not "decode a frame," since frames only exist as the player
   /// produces them (design §5's rule, honored here rather than in `tick`). The output is
-  /// added to this first `item` for good measure, but `tick` is what actually keeps it
-  /// attached to whatever item is *really* playing — see `attachedItem`'s doc comment for
-  /// why that can't be a one-time setup step here.
+  /// added to this first `item`, and `attachedItem` is set to match — `tick` is what
+  /// actually keeps it attached to whatever item is *really* playing, and it needs
+  /// `attachedItem` to start out correct (not nil) so its very first re-attach check knows
+  /// to detach from *this* item rather than skipping the detach and double-attaching (see
+  /// `tick`'s comment on `remove(output)`).
   public func load(url: URL) {
     let item = AVPlayerItem(url: url)
     let out = AVPlayerItemVideoOutput(pixelBufferAttributes: [
@@ -85,7 +87,7 @@ public final class MovieSource: SeedSource {
     player = queuePlayer
     cachedMTLTexture = nil
     cachedCVTexture = nil
-    attachedItem = nil
+    attachedItem = item
     queuePlayer.play()
   }
 
@@ -100,7 +102,20 @@ public final class MovieSource: SeedSource {
     // Re-attach on every identity change of `player.currentItem` — see `attachedItem`'s
     // doc comment. Cheap when nothing has changed (a reference comparison), and this is
     // the only hook `tick` has into "the looper just advanced to its next queued item."
+    //
+    // `attachedItem?.remove(output)` runs before `current.add(output)`: Apple's documented
+    // contract for `AVPlayerItemOutput` is one attached `AVPlayerItem` at a time, and
+    // `-[AVPlayerItem addOutput:]` is documented to raise "Cannot attach an output that is
+    // already attached" if that's violated. A code-review pass flagged the skip-the-detach
+    // version as a crash risk under sustained looping; a stress test here (up to 3.5 s, ~8
+    // loop wraps) did not actually trigger the exception on this SDK/OS, so this fix rests
+    // on the documented contract rather than a locally-reproduced crash — still the right
+    // call, since relying on undocumented tolerance for a double-attach is fragile across OS
+    // versions regardless of what this one machine does today. `load(url:)` sets
+    // `attachedItem` to its initial item precisely so this remove call has something valid
+    // to target on the very first re-attach too.
     if let current = player?.currentItem, current !== attachedItem {
+      attachedItem?.remove(output)
       current.add(output)
       attachedItem = current
     }
@@ -123,6 +138,14 @@ public final class MovieSource: SeedSource {
 
     cachedCVTexture = cvTexture     // keeps the IOSurface backing mtlTexture alive
     cachedMTLTexture = mtlTexture
+    // Apple's guidance for `CVMetalTextureCache` in a sustained render loop: flush
+    // periodically (once per frame is the documented cadence) so textures whose
+    // `CVMetalTexture`/`MTLTexture` wrappers have already been released get reclaimed
+    // instead of accumulating for the cache's lifetime. Placed on the fresh-texture path
+    // (not the fallback-to-cache path above) because that's the only path where the cache
+    // actually grew this tick — nothing to reclaim on a repeat-frame tick that made no new
+    // cache entry.
+    CVMetalTextureCacheFlush(textureCache, 0)
     return mtlTexture
   }
 }
