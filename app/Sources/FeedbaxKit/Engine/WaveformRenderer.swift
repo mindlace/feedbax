@@ -186,6 +186,21 @@ public final class WaveformRenderer {
     }
   }
 
+  /// Pixel→NDC half-size conversion for wave 2's point sprites (PARITY-REVIEW — see
+  /// `Composite.metal`'s header comment on this file's ribbon/point vertex functions for
+  /// the full aspect-agnostic-canvas-height caveat, shared by `drawWave1`'s ribbon
+  /// half-width): NDC spans 2 units over `canvasHeight` pixels, so half of a
+  /// `pointSizePx`-pixel-edge square is `pointSizePx / canvasHeight` NDC units — the same
+  /// "full size in pixels, divided once by canvasHeight" arithmetic as the ribbon's
+  /// `halfWidthNDC`, not divided by 2 again (a square's half-edge in NDC is the *full*
+  /// edge's pixel count times the pixel→NDC scale, since that scale is already
+  /// "NDC-units-per-pixel", not "NDC-units-per-half-pixel"). Pure and unit-tested
+  /// (`WaveformTests.testPointSpriteHalfSizeNDCConversion`) so this arithmetic is pinned
+  /// independent of the GPU draw path.
+  public static func pointSpriteHalfSizeNDC(pointSizePx: Float, canvasHeight: Float) -> Float {
+    pointSizePx / canvasHeight
+  }
+
   // MARK: - GPU draw (untested by unit tests — Metal-dependent)
 
   /// Hooked into `Compositor.overlays` (Task 9) — draws under the feedback plane, using
@@ -242,8 +257,8 @@ public final class WaveformRenderer {
     let style = WaveformStyle.wave2
     let points = WaveformRenderer.wave2Points(samples, style: style)
     guard !points.isEmpty else { return }
-    // Same PARITY-REVIEW pixel→NDC convention as the ribbon, applied to the sprite edge.
-    let halfSizeNDC = style.pointSizePx / canvasHeight / 2
+    let halfSizeNDC = WaveformRenderer.pointSpriteHalfSizeNDC(pointSizePx: style.pointSizePx,
+                                                               canvasHeight: canvasHeight)
     let corners: [SIMD2<Float>] = [
       SIMD2(-halfSizeNDC, -halfSizeNDC), SIMD2(halfSizeNDC, -halfSizeNDC), SIMD2(-halfSizeNDC, halfSizeNDC),
       SIMD2(halfSizeNDC, -halfSizeNDC), SIMD2(halfSizeNDC, halfSizeNDC), SIMD2(-halfSizeNDC, halfSizeNDC),

@@ -28,6 +28,14 @@ final class WaveformTests: XCTestCase {
     XCTAssertEqual(SIMD3(c2.x, c2.y, c2.z), SIMD3(0, 0.786722, 0.821229))
     XCTAssertEqual(WaveformStyle.wave1.lineWidthPx, 12)
   }
+  /// Pins the pixel→NDC half-size arithmetic directly (caught a prior authoring slip that
+  /// divided by an extra factor of 2, shrinking wave 2's sprites to ~4px instead of the
+  /// documented 8px — the GPU smoke test below didn't catch it because it only checks that
+  /// *a* pixel lands on the expected color, not the sprite's actual extent).
+  func testPointSpriteHalfSizeNDCConversion() {
+    let halfSize = WaveformRenderer.pointSpriteHalfSizeNDC(pointSizePx: 8, canvasHeight: 1080)
+    XCTAssertEqual(halfSize, 8.0 / 1080.0, accuracy: 1e-6)
+  }
 
   /// GPU smoke test — not in the brief's pinned set, added because the ribbon/point-sprite
   /// shaders (Composite.metal's `fbx_ribbon_v`/`fbx_point_v`/`fbx_point_f`) have no other
