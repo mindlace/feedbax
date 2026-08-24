@@ -87,6 +87,35 @@ final class StickerSourceTests: XCTestCase {
     XCTAssertEqual(seen, 2)
   }
 
+  func testReselectingSameIndexSkipsRedecode() throws {
+    // spec §02 §2's `zl change`: "re-selecting the same file is a no-op". `select(normalized:)`
+    // is fed by a continuous touch/slider stream in practice, so this matters for real: hovering
+    // on one item must not re-decode from disk on every callback.
+    let ctx = try MetalContext()
+    let src = StickerSource(context: ctx, folder: folder)
+    src.select(normalized: 0.34)                          // Int(0.34·3) = 1 → green
+    XCTAssertEqual(src.selectedIndex, 1)
+    let tex = try XCTUnwrap(src.tick(makeFrame(ctx)))
+    src.select(normalized: 0.5)                           // Int(0.5·3) = 1 → same index, different input
+    XCTAssertEqual(src.selectedIndex, 1)
+    XCTAssertTrue(src.tick(makeFrame(ctx)) === tex,
+                  "re-selecting the same index must not produce a freshly-decoded texture")
+  }
+
+  func testRescanBypassesDedupeEvenAtSameIndex() throws {
+    // rescan() always resets to index 0, which can numerically equal the index already
+    // selected — but the FILE at that index may have changed, so the dedupe above must not
+    // suppress this re-decode just because "index 0" was already current.
+    let ctx = try MetalContext()
+    let src = StickerSource(context: ctx, folder: folder)   // selectedIndex 0 (red) from init
+    XCTAssertEqual(src.selectedIndex, 0)
+    let firstTex = try XCTUnwrap(src.tick(makeFrame(ctx)))
+    src.rescan()                                            // resets to 0 again — same index number
+    XCTAssertEqual(src.selectedIndex, 0)
+    let secondTex = try XCTUnwrap(src.tick(makeFrame(ctx)))
+    XCTAssertFalse(secondTex === firstTex, "rescan must force a fresh decode, not trust the dedupe cache")
+  }
+
   // MARK: - Helpers
 
   /// Writes a solid-color `width`×`height` PNG with STRAIGHT (non-premultiplied) alpha —

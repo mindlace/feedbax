@@ -60,28 +60,48 @@ public final class StickerSource: SeedSource {
   /// Setting this decodes immediately (see the type doc above) and caches the result; `tick`
   /// never touches the decoder. Out-of-range values clamp into `0..<itemCount` rather than
   /// trapping — a UI slider mid-drag will walk through values a discrete file list doesn't
-  /// have yet.
+  /// have yet. Re-selecting the index that's already current is a no-op (see
+  /// `setSelectedIndex(_:force:)`) — the original patch's `zl change` dedupe (spec §02 §2:
+  /// "re-selecting the same file is a no-op").
   public var selectedIndex: Int {
     get { _selectedIndex }
-    set {
-      guard itemCount > 0 else { _selectedIndex = 0; cachedTexture = nil; return }
-      let clamped = min(max(newValue, 0), itemCount - 1)
-      _selectedIndex = clamped
-      cachedTexture = Self.decodeImage(at: items[clamped], context: context)
-    }
+    set { setSelectedIndex(newValue, force: false) }
+  }
+
+  /// The shared selection path for `selectedIndex`'s setter, `select(normalized:)`, and
+  /// `rescan()`. `force: false` (the normal case) dedupes: if the clamped index equals
+  /// `_selectedIndex` AND a texture is already cached, this is a no-op — the original
+  /// patch's `zl change` before its `prepend read` (spec §02 §2: "re-selecting the same file
+  /// is a no-op"). That dedupe matters here specifically because `select(normalized:)` is
+  /// fed by a continuous touch/slider stream (spec §02 §2 item 4) that can call this dozens
+  /// of times a second while sitting on one item; without it, every one of those calls would
+  /// re-decode from disk — exactly the per-frame cost the type doc's decode-on-selection
+  /// design exists to avoid, just moved from "per frame" to "per pointer-move event."
+  /// `force: true` (only `rescan()`) bypasses the dedupe deliberately: a rescan can leave
+  /// `_selectedIndex` numerically unchanged (it always resets to 0) while the file *at* that
+  /// index has changed — dropping a new `a-first.png` into the folder, or `c-blue.png`
+  /// disappearing and something else sorting into index 0 — so the cache must never survive
+  /// a rescan on index-equality alone.
+  private func setSelectedIndex(_ newValue: Int, force: Bool) {
+    guard itemCount > 0 else { _selectedIndex = 0; cachedTexture = nil; return }
+    let clamped = min(max(newValue, 0), itemCount - 1)
+    if !force, clamped == _selectedIndex, cachedTexture != nil { return }
+    _selectedIndex = clamped
+    cachedTexture = Self.decodeImage(at: items[clamped], context: context)
   }
 
   public init(context: MetalContext, folder: URL) {
     self.context = context
     self.folder = folder
     scan()
-    if itemCount > 0 { selectedIndex = 0 }   // decode the first sticker up front
+    if itemCount > 0 { setSelectedIndex(0, force: true) }   // decode the first sticker up front
   }
 
   /// `0...1` → index (spec §02 §2 item 4 — the picker slider's mapping). `v = 1.0` maps to
   /// the LAST item, not one past it: `min(Int(v·count), count−1)` rather than a bare
   /// `Int(v·count)`, matching `testNormalizedSelectionAndRescanReset`'s `select(normalized:
-  /// 0.99)` landing on index 2 of 3.
+  /// 0.99)` landing on index 2 of 3. Routes through `selectedIndex`'s setter, so the same-
+  /// index dedupe documented there applies here too.
   public func select(normalized: Float) {
     guard itemCount > 0 else { return }
     let idx = min(Int(normalized * Float(itemCount)), itemCount - 1)
@@ -91,9 +111,11 @@ public final class StickerSource: SeedSource {
   /// Repopulates `items` from disk and resets selection to the first item (spec §02 §2): a
   /// rescan mid-session (a file added or removed) must not leave `selectedIndex` pointing at
   /// a file that no longer exists, or silently keep showing a stale decode of a deleted one.
+  /// Uses `force: true` — see `setSelectedIndex(_:force:)` — so a rescan always re-decodes
+  /// index 0 even when the index number didn't change.
   public func rescan() {
     scan()
-    selectedIndex = 0
+    setSelectedIndex(0, force: true)
     onCountChanged?(itemCount)
   }
 
