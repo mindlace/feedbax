@@ -32,7 +32,13 @@ import simd
 public final class EngineViewModel: ObservableObject, ControlSurface {
   public let id = "operator-ui"
 
-  public var engine: Engine?
+  // `weak`, not a strong reference: `Engine.router.surfaces` holds THIS object strongly (once
+  // `feedbax-dev/main.swift` registers it, same as keyboard/gamepad), so a strong `engine` here
+  // would close a retain cycle (Engine → router → surfaces → EngineViewModel → engine → Engine)
+  // that only the process exiting would ever break. `main.swift`'s own top-level `engine`
+  // global is what actually keeps `Engine` alive for the app's lifetime; this property only
+  // ever needs to reach it, never own it.
+  public weak var engine: Engine?
   public var presetStore: PresetStore?
 
   // MARK: - Slot writes (the 7 live sliders; `.scalebright`/`.nc` are dead — ControlVector.swift)
