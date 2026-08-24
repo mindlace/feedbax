@@ -29,6 +29,69 @@ fragment float4 fbx_quad_f(QuadVertexOut in [[stage_in]],
 fragment float4 fbx_solid_f(QuadVertexOut in [[stage_in]],
                             constant QuadUniforms& u [[buffer(0)]]) { return u.tint; }
 
+// Waveform overlay draws (Engine/WaveformRenderer.swift, Task 18) — wave 1's radial ribbon
+// and wave 2's dotted point sprites (spec §03 §5). Both pipelines share one uniforms
+// struct, one vertex-out struct, and one fragment function: neither draw needs per-pixel
+// texture sampling, just the flat parity color, so there's nothing for a dedicated
+// fragment function per shape to do differently.
+//
+// Ribbon/point expansion happens here in **clip space**, not NDC or world space: each
+// vertex arrives with a precomputed screen-ish offset (`normal·halfWidthNDC` for the
+// ribbon, `corner` for a point sprite's quad corner) that WaveformRenderer computed from
+// `lineWidthPx`/`pointSizePx` divided by the canvas height in pixels (documented
+// approximation — PARITY-REVIEW: this makes the offset aspect-agnostic, so a on a
+// non-square canvas the stroke/sprite is exact on the vertical axis and mildly stretched
+// on the horizontal one; `jit.gl.graph`'s own pixel-metric convention isn't pinned by the
+// spec, see WaveformRenderer.swift). Multiplying that offset by `clip.w` before adding it
+// to `clip.xy` is what makes it perspective-correct: after the GPU's own perspective
+// divide (clip/clip.w), the offset survives at its intended NDC size regardless of the
+// vertex's depth — the standard "screen-space line width" trick.
+struct WaveVertexOut { float4 pos [[position]]; };
+struct WaveUniforms { float4x4 projection; float z; float4 color; };
+
+// Mirrors WaveformRenderer.swift's `RibbonVertex` field-for-field (see QuadUniforms above
+// for why this matters: identical byte layout is what lets `setVertexBuffer` hand the GPU
+// exactly what Swift wrote).
+struct RibbonVertex { float2 point; float2 normal; float halfWidthNDC; };
+// One (point, corner) pair per triangle-list vertex — WaveformRenderer.swift emits 6 per
+// wave-2 sample (two triangles), `corner` already baked to ± halfSizeNDC per corner.
+struct PointVertex { float2 point; float2 corner; };
+
+// Wave 1 (spec §03 §5 `radial 1`): a closed-loop polyline drawn as a screen-space ribbon.
+// `v.point` is the polyline sample already in the waveform's local xy-plane (radius +
+// sample, see WaveformRenderer.wave1Polyline); `u.z` places the whole ribbon at the
+// style's fixed depth (0 for wave 1, spec §03 §5's `position` row).
+vertex WaveVertexOut fbx_ribbon_v(uint vid [[vertex_id]],
+                                  constant RibbonVertex* verts [[buffer(0)]],
+                                  constant WaveUniforms& u [[buffer(1)]]) {
+  RibbonVertex v = verts[vid];
+  float4 clip = u.projection * float4(v.point, u.z, 1.0);
+  clip.xy += v.normal * v.halfWidthNDC * clip.w;
+  WaveVertexOut out;
+  out.pos = clip;
+  return out;
+}
+
+// Wave 2 (spec §03 §5 `poly_mode (0,0)` + `circpoints 5`): each sample drawn as a small
+// square sprite — the port's documented approximation of Jitter's per-point polygon dots
+// (WaveformRenderer.swift has the full reasoning).
+vertex WaveVertexOut fbx_point_v(uint vid [[vertex_id]],
+                                 constant PointVertex* verts [[buffer(0)]],
+                                 constant WaveUniforms& u [[buffer(1)]]) {
+  PointVertex v = verts[vid];
+  float4 clip = u.projection * float4(v.point, u.z, 1.0);
+  clip.xy += v.corner * clip.w;
+  WaveVertexOut out;
+  out.pos = clip;
+  return out;
+}
+
+// Shared by both pipelines above — flat parity color, no texture (see file-header note).
+fragment float4 fbx_point_f(WaveVertexOut in [[stage_in]],
+                            constant WaveUniforms& u [[buffer(1)]]) {
+  return u.color;
+}
+
 // Jitter `erase` with blending on = translucent quad over the old frame (spec §01 §2):
 // rgb' = a·erase.rgb + (1−a)·prev.rgb ; a' = a·a + (1−a)·prev.a
 kernel void fbx_erase(texture2d<float, access::read> prev [[texture(0)]],
