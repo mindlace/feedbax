@@ -163,6 +163,7 @@ public final class AudioAnalysis {
   private let engine = AVAudioEngine()
   private let bands: AudioBands
   private let tapBus: AVAudioNodeBus = 0
+  private var isRunning = false
 
   public init(bands: AudioBands) throws {
     self.bands = bands
@@ -174,18 +175,27 @@ public final class AudioAnalysis {
   /// Spec §03 §2 targets 48 kHz mono; the caller must construct `AudioBands` with whatever
   /// sample rate the actual input hardware reports, or the biquad center frequencies will be
   /// off — this path has no automated coverage to catch that mismatch.
+  ///
+  /// Idempotent (`start()` while already running, or `stop()` while already stopped, are both
+  /// no-ops) — Task 16's `MovieSource` review caught a double-attach crash from exactly this
+  /// missing guard on a different AV object; guarding here up front since this class has no
+  /// automated test to catch the same class of bug.
   public func start() throws {
+    guard !isRunning else { return }
     let input = engine.inputNode
     let format = input.inputFormat(forBus: tapBus)
     input.installTap(onBus: tapBus, bufferSize: 1024, format: format) { [weak self] buffer, _ in
       self?.handle(buffer)
     }
     try engine.start()
+    isRunning = true
   }
 
   public func stop() {
+    guard isRunning else { return }
     engine.inputNode.removeTap(onBus: tapBus)
     engine.stop()
+    isRunning = false
   }
 
   private func handle(_ buffer: AVAudioPCMBuffer) {
