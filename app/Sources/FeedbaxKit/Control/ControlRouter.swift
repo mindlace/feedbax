@@ -56,7 +56,14 @@ public final class ControlRouter {
     var ramps: [ControlSlot: LinearRamp] = [:]
     var targets: [ControlSlot: Float] = [:]
     for slot in ControlRouter.rampedSlots {
-      let target = ControlRouter.mappedTarget(for: slot, raw: 0, sInvert: 1)
+      // Cold start (spec §01 §4): most ramps seed from whatever raw 0 maps to — the original
+      // never emits a value for these until the first control message unpacks a target
+      // (`mIniCtlSmooth`'s `line` is silent until then), and raw-0 IS that "nothing has
+      // happened yet" state. Hue/saturation/bias are the exception — `coldStartTarget` below
+      // overrides them with the HSL pix's own baked `param` defaults, which is what's
+      // actually on screen during that same window.
+      let target = ControlRouter.coldStartTarget(for: slot)
+        ?? ControlRouter.mappedTarget(for: slot, raw: 0, sInvert: 1)
       ramps[slot] = LinearRamp(initial: target, smoothMs: smoothMs, grainMs: grainMs)
       targets[slot] = target
     }
@@ -69,6 +76,29 @@ public final class ControlRouter {
   /// their own pace toward whatever new targets this write implies.
   public func apply(_ write: ControlWrite, at time: TimeInterval) {
     mergeAndProcess(write, at: time)
+  }
+
+  /// The exact 9 floats webui's `loadbang` packs and broadcasts ~0 ms after patch load (spec
+  /// §04 §1.1), index-for-index against `ControlSlot`'s declaration order (hue, bias,
+  /// scalebright, panX, panY, zoom, theta, nc, saturation). This is the vector every fresh
+  /// session actually starts from — not the all-zero rest state a bare `ControlRouter()`
+  /// otherwise reads as.
+  public static let startupVector: [Float] = [
+    0.011905, 0.392857, 0.755952, -0.354023, -0.5, -0.634044, 0.281234, 0.0, 0.71131
+  ]
+
+  /// Reproduces the original's cold start: the webui's loadbang-fired startup vector lands
+  /// (ramped, same as any other `apply`), and TRANSPARANCY — the webui's persisted erase
+  /// slider — comes up at 1.0, a hard clear that stays until the performer first touches
+  /// erase (spec §04 §1.4). `eraseControl` is set directly, not via `ControlWrite.eraseStep`
+  /// (a relative nudge): this is an absolute "here is where the session starts," not a step.
+  public func applyStartupDefaults(at time: TimeInterval) {
+    var slots: [ControlSlot: Float] = [:]
+    for slot in ControlSlot.allCases {
+      slots[slot] = ControlRouter.startupVector[slot.rawValue]
+    }
+    apply(ControlWrite(slots: slots), at: time)
+    eraseControl = 1.0
   }
 
   /// One frame: poll every surface in order (last-writer-wins per slot), advance every ramp
@@ -119,6 +149,23 @@ public final class ControlRouter {
         ramps[slot]?.setTarget(target, at: time)
         lastRampTarget[slot] = target
       }
+    }
+  }
+
+  /// spec §01 §4: the HSL pix's own three `param` objects declare non-zero defaults —
+  /// `hue_shift 0.02`, `saturation 0.5`, `lightness 0.5` — and those, not zero, are what the
+  /// original renders for however many frames elapse before the first control-vector message
+  /// ever arrives (`mIniCtlSmooth`'s `line` produces no output at all until its first target
+  /// is unpacked, so the `"hue_shift $1"`/etc. messages that would overwrite these never
+  /// fire). Seeding these three ramps here — instead of at mapped raw-0 like every other
+  /// ramped slot — is this port's frame-0 cold start matching that. Non-HSL slots have no
+  /// such baked pix default, so they fall through to `nil` and keep the raw-0 behavior.
+  private static func coldStartTarget(for slot: ControlSlot) -> Float? {
+    switch slot {
+    case .hue: return 0.02
+    case .saturation: return 0.5
+    case .bias: return 0.5   // feeds lightDelta — see RenderParams.lightDelta
+    default: return nil
     }
   }
 
