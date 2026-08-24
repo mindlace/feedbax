@@ -10,17 +10,28 @@ import simd
 public struct PreviewView: NSViewRepresentable {
   public let engine: Engine
   public let surface: KeyboardTrackpadSurface
+  /// Mirrors `EngineViewModel.hudEnabled` (Task 20) — a plain value, not a binding, so SwiftUI
+  /// re-invokes `updateNSView` whenever the operator's HUD toggle changes, the same way any
+  /// other `NSViewRepresentable` prop change propagates. Defaults to `true` (`OutputStage
+  /// .hudEnabled`'s own default) so a caller that predates the operator panel keeps compiling
+  /// and rendering the HUD exactly as before.
+  public var hudEnabled: Bool = true
 
-  public init(engine: Engine, surface: KeyboardTrackpadSurface) {
+  public init(engine: Engine, surface: KeyboardTrackpadSurface, hudEnabled: Bool = true) {
     self.engine = engine
     self.surface = surface
+    self.hudEnabled = hudEnabled
   }
 
   public func makeNSView(context: Context) -> MetalHostView {
-    MetalHostView(engine: engine, surface: surface)
+    let view = MetalHostView(engine: engine, surface: surface)
+    view.hudEnabled = hudEnabled
+    return view
   }
 
-  public func updateNSView(_ nsView: MetalHostView, context: Context) {}
+  public func updateNSView(_ nsView: MetalHostView, context: Context) {
+    nsView.hudEnabled = hudEnabled
+  }
 }
 
 /// The actual `CAMetalLayer`-backed `NSView`. Owns the render loop end to end once it has a
@@ -37,6 +48,15 @@ public final class MetalHostView: NSView {
   private var clock: FrameClock?
   private var outputStage: OutputStage?
   private var lastFrameTimestamp: CFTimeInterval?
+
+  /// Forwards to `OutputStage.hudEnabled` (Task 20's HUD toggle, `EngineViewModel.hudEnabled`
+  /// via `PreviewView`). Stored here too, not just proxied, because `outputStage` doesn't exist
+  /// yet at `init` time (built lazily in `viewDidMoveToWindow`, see that method's comment) — the
+  /// `didSet` keeps whatever was set before the window existed, and `viewDidMoveToWindow`
+  /// applies it once `outputStage` is finally there.
+  public var hudEnabled: Bool = true {
+    didSet { outputStage?.hudEnabled = hudEnabled }
+  }
 
   public init(engine: Engine, surface: KeyboardTrackpadSurface) {
     self.engine = engine
@@ -78,6 +98,7 @@ public final class MetalHostView: NSView {
     // the layer's eventual display) — deferred until the view is actually in a window, not
     // built in `init`.
     outputStage = try? OutputStage(context: engine.context, pixelFormat: metalLayer.pixelFormat)
+    outputStage?.hudEnabled = hudEnabled   // apply whatever was set before the window existed
     clock = FrameClock(layer: metalLayer, rate: engine.frameRate) { [weak self] update in
       self?.renderFrame(update)
     }
