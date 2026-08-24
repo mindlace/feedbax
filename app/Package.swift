@@ -13,7 +13,7 @@ let package = Package(
     .testTarget(
       name: "FeedbaxKitTests",
       dependencies: ["FeedbaxKit"],
-      resources: [.copy("GoldenReferences")]
+      resources: [.copy("GoldenReferences"), .copy("Fixtures")]
     ),
   ]
 )

@@ -4,11 +4,6 @@ import CoreVideo
 import simd
 @testable import FeedbaxKit
 
-/// Test-only failure for the fixture-movie writer below — distinct from `FeedbaxError`
-/// (that enum is `FeedbaxKit`'s engine-init/shader-lookup errors, not a fit for
-/// "AVAssetWriter refused to start").
-private enum TestFixtureError: Error { case step(String) }
-
 final class MovieSourceTests: XCTestCase {
   var fixtureURL: URL!
 
@@ -123,61 +118,9 @@ final class MovieSourceTests: XCTestCase {
   }
 
   // MARK: - Fixture generator
-
-  /// Writes a `frameCount`-frame, `size`×`size`, H.264 movie at `fps` whose frames sweep
-  /// red (frame 0) → black (the last frame) — `MovieSourceTests`' only external dependency,
-  /// since the repo has no checked-in test movie. `AVAssetWriterInputPixelBufferAdaptor`
-  /// hands each frame a pool-backed `CVPixelBuffer` already in the writer's chosen pixel
-  /// format, so this never needs its own CVPixelBufferPool bookkeeping.
-  func writeFixtureMovie(to url: URL, frameCount: Int, size: Int, fps: Int32) throws {
-    let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-    let videoSettings: [String: Any] = [
-      AVVideoCodecKey: AVVideoCodecType.h264,
-      AVVideoWidthKey: size,
-      AVVideoHeightKey: size,
-    ]
-    let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-    input.expectsMediaDataInRealTime = false
-    let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
-      kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-      kCVPixelBufferWidthKey as String: size,
-      kCVPixelBufferHeightKey as String: size,
-    ])
-    writer.add(input)
-    guard writer.startWriting() else {
-      throw TestFixtureError.step("startWriting: \(writer.error?.localizedDescription ?? "?")")
-    }
-    writer.startSession(atSourceTime: .zero)
-
-    for i in 0..<frameCount {
-      while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval: 0.01) }
-      guard let pool = adaptor.pixelBufferPool else { throw TestFixtureError.step("no pixel buffer pool") }
-      var pixelBufferOut: CVPixelBuffer?
-      CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pixelBufferOut)
-      guard let pixelBuffer = pixelBufferOut else { throw TestFixtureError.step("pixel buffer alloc") }
-      // Red sweeps from full (frame 0) to black (the last frame); BGRA byte order matches
-      // the pool's kCVPixelFormatType_32BGRA.
-      let red = UInt8(255 * (frameCount - 1 - i) / max(frameCount - 1, 1))
-      CVPixelBufferLockBaseAddress(pixelBuffer, [])
-      if let base = CVPixelBufferGetBaseAddress(pixelBuffer) {
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
-        let ptr = base.assumingMemoryBound(to: UInt8.self)
-        for y in 0..<size {
-          for x in 0..<size {
-            let o = y * bytesPerRow + x * 4
-            ptr[o] = 0; ptr[o + 1] = 0; ptr[o + 2] = red; ptr[o + 3] = 255   // B G R A
-          }
-        }
-      }
-      CVPixelBufferUnlockBaseAddress(pixelBuffer, [])
-      adaptor.append(pixelBuffer, withPresentationTime: CMTime(value: Int64(i), timescale: fps))
-    }
-    input.markAsFinished()
-    let done = DispatchSemaphore(value: 0)
-    writer.finishWriting { done.signal() }
-    done.wait()
-    guard writer.status == .completed else {
-      throw TestFixtureError.step("finishWriting: \(writer.error?.localizedDescription ?? "?")")
-    }
-  }
+  //
+  // `writeFixtureMovie` used to live here as a private helper; Task 22's golden-frame
+  // harness needed the identical generator to produce its own (committed, one-time)
+  // `sweep.mov` fixture, so it now lives in `TestSupport/FixtureGenerators.swift` and both
+  // call sites share it rather than keeping two copies in sync by hand.
 }

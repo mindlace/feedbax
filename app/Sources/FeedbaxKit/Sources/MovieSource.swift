@@ -57,6 +57,18 @@ public final class MovieSource: SeedSource {
   /// file loaded yet (or playback paused) reads false.
   public var isPlaying: Bool { (player?.rate ?? 0) != 0 }
 
+  /// Freezes playback on whatever frame is currently showing — `player.rate = 0`, not a
+  /// stop/teardown. Added for Task 22's golden-frame harness: `tick`'s "current frame" is
+  /// `output.itemTime(forHostTime:)`, a mapping from the WALL CLOCK to item time that keeps
+  /// advancing for as long as the player is running, which makes a headless capture's exact
+  /// captured frame a function of how much real time happened to elapse before that capture
+  /// — not reproducible run to run. Pausing right after a scenario's `configure` hook has
+  /// primed the first frame removes that dependency: `hasNewPixelBuffer` stops reporting new
+  /// frames once the mapped item time stops moving, so every subsequent `tick` deterministically
+  /// falls back to the same cached texture (the documented repeat-frame path, `tick`'s own
+  /// doc) regardless of how much wall-clock time passes before the capture actually runs.
+  public func pause() { player?.rate = 0 }
+
   public init(context: MetalContext) {
     self.context = context
     // Failure here (a headless/software-only Metal device) just means `tick` will always
