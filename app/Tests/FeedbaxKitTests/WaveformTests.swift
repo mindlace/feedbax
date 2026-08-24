@@ -72,5 +72,23 @@ final class WaveformTests: XCTestCase {
 
     let pixels = ctx.readPixels(target)
     XCTAssertTrue(pixels.contains { $0.w > 0 }, "expected at least one drawn (non-transparent) pixel")
+
+    // Color check, not just "something is opaque": guards against a Swift/Metal struct
+    // layout mismatch between RibbonVertex/PointVertex/WaveUniforms and their
+    // Composite.metal twins, which could still satisfy the loose alpha check above with
+    // garbled (but nonzero) colors. Composited onto transparent black, alphaOver's dst
+    // factor is (1−srcA) and srcAlphaDstAlpha's is dstA — both zero on first write — so
+    // each waveform's first-touched pixel is exactly `color.rgb * srcAlpha`.
+    func hasPixel(near expected: SIMD3<Float>, tol: Float) -> Bool {
+      pixels.contains { simd_length($0.xyz - expected) < tol }
+    }
+    let wave1Expected = SIMD3<Float>(0.392375, 0.23808, 0) * Float(0.8)  // srcAlpha 0.8 (style.color.w)
+    let wave2Expected = SIMD3<Float>(0, 0.786722, 0.821229) * Float(0.6)  // 0.5 base + 0.1 waveBumpRaw
+    XCTAssertTrue(hasPixel(near: wave1Expected, tol: 0.02), "expected wave 1's burnt-orange ribbon color")
+    XCTAssertTrue(hasPixel(near: wave2Expected, tol: 0.02), "expected wave 2's cyan sprite color")
   }
+}
+
+private extension SIMD4 where Scalar == Float {
+  var xyz: SIMD3<Float> { SIMD3(x, y, z) }
 }
