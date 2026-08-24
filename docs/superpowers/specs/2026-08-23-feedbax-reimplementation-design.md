@@ -113,7 +113,7 @@ flowchart LR
   subgraph app["Feedbax.app (one process)"]
     subgraph engine["Engine (Swift + Metal)"]
       clock["FrameClock\n30–120 Hz"] --> core
-      core["FeedbackCore\naccumulator ping-pong\nrota-fold → HSL (→ brcosa)\nerase · (srcα,dstα) blend"]
+      core["FeedbackCore\naccumulator ping-pong\nrota-fold → HSL\nerase · (srcα,dstα) blend"]
       comp["Compositor\nseed layers · waveforms\ndraw order"] --> core
       core --> out["OutputStage\nN viewports / displays\nmirror · span · crop"]
     end
@@ -150,7 +150,8 @@ Per tick, in this exact order (spec README; ordering is load-bearing):
 1. Partially erase the accumulator toward black: `α = 0.8 + 0.2·t³`, `t` = erase control ∈ [0,1].
    A blend toward the erase color, never a clear; **α is the one unsmoothed parameter**.
 2. Warp the previous frame's texture: rota (inverse warp, pixel coordinates, anchor 0.5/0.5,
-   mirror-fold bounds) → additive HSL → (optionally brcosa, the v122 look — see §6).
+   mirror-fold bounds) → additive HSL. (v122 appended a brcosa output grade here; v1 omits it —
+   see §6 decision 13.)
 3. Draw seed layers and waveforms *first*.
 4. Draw the warped previous frame *over* them as a full-screen quad with blend
    `(SRC_ALPHA, DST_ALPHA)` — not alpha-over.
@@ -241,8 +242,9 @@ attaches to any source. Built-ins:
 * **`LumaKeyFilter` / `ChromaKeyFilter`** — the parity keyers (two-pass midtone cascade;
   HSV-weighted chroma), their strict either/or preserved as a UI rule on the camera chain, not
   as a chain limitation.
-* **`BrcosaFilter`** — the unclamped camera color stage, doubling as the optional v122 output
-  grade.
+* **`BrcosaFilter`** — the unclamped camera color stage (gated off by default, hot dial
+  defaults 1.55/1.55/1.5, per spec §02 §7.2). The same filter *could* later be appended to the
+  output chain to recover Sean's v122 output grade, but v1 ships without that (decision 13).
 * **`MatteOverlayFilter`** — the vignette matte, reading alpha (the fixed version, §6).
 * **`StickerBorderFilter`** — dilated white outline. `AutoMatte → StickerBorder` *is*
   "stickerify": the party upload path (§7) runs exactly this chain at ingest, so upload-time and
@@ -305,7 +307,7 @@ end up in tests (§9):
 | 10 | Bumps are smoothed levels, default off; wave-2 alpha = base + envelope, unclamped | §03 |
 | 11 | Waveform 1: radial, bottom, thick burnt-orange; waveform 2: dotted cyan, `(srcα,dstα)` | §03 |
 | 12 | Parity default keeps keyers on the camera chain only; luma = two-pass midtone cascade; chroma HSV weights (4,1,2) | §02 |
-| 13 | brcosa: ship as a toggle. Off = v123 parity; on = Sean's performed v122 look (exact math in spec) | §01/§05 |
+| 13 | Output brcosa: omitted in v1 (v123 parity — the stage is dead-wired in v123). `BrcosaFilter` ships anyway for the camera chain, so re-adding the v122 output grade later is appending that filter to the output chain. Low-risk: the v122 dials init to 1.0/1.0/1.0, an exact identity, so v122 topology at defaults renders pixel-identical to v123 | §01/§05 |
 | 14 | No LFOs, no idle animation, no auto-drift | §04 |
 
 Known original bugs we fix rather than port: the layer-enable last-writer race (becomes an OR),
@@ -420,9 +422,7 @@ solo performer before anything party-shaped exists.
 1. **Mac-only lock-in** — the recommendation buys fidelity and app-ness with portability. Any
    future scenario (a Linux gallery box?) that should veto Option A?
 2. **Name** — does the reimplementation stay "Feedbax"?
-3. **brcosa default** — proposal ships it as a toggle, default *off* (v123 parity). Sean
-   *performed* with it on (v122); default on instead?
-4. **Minimal presets** — the original had none; a "save current settings" is nearly free in P1.
+3. **Minimal presets** — the original had none; a "save current settings" is nearly free in P1.
    Include?
 
 ### Resolved
@@ -434,3 +434,8 @@ solo performer before anything party-shaped exists.
   with auto-stickerification (`AutoMatteFilter`) as the flagship filter.
 * **Baseline local input** (2026-08-23): keyboard/trackpad and game-controller surfaces are P1
   deliverables covering the ~7 axes + booleans; exotic surfaces are additive.
+* **Output brcosa** (2026-08-24): omitted in v1 rather than shipped as a toggle. Verified in the
+  patch JSON that the v122 output-side dials initialize to 1.0/1.0/1.0 — an exact identity
+  through the brcosa math — so the v122/v123 looks only diverge once a performer moves a dial.
+  `BrcosaFilter` exists regardless (camera chain), so the v122 output grade is recoverable later
+  by appending it to the output chain. Decision 13 updated to match.
