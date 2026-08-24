@@ -39,7 +39,7 @@ fragment float4 fbx_solid_f(QuadVertexOut in [[stage_in]],
 // vertex arrives with a precomputed screen-ish offset (`normal·halfWidthNDC` for the
 // ribbon, `corner` for a point sprite's quad corner) that WaveformRenderer computed from
 // `lineWidthPx`/`pointSizePx` divided by the canvas height in pixels (documented
-// approximation — PARITY-REVIEW: this makes the offset aspect-agnostic, so a on a
+// approximation — PARITY-REVIEW: this makes the offset aspect-agnostic, so on a
 // non-square canvas the stroke/sprite is exact on the vertical axis and mildly stretched
 // on the horizontal one; `jit.gl.graph`'s own pixel-metric convention isn't pinned by the
 // spec, see WaveformRenderer.swift). Multiplying that offset by `clip.w` before adding it
