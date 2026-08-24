@@ -298,6 +298,13 @@ order (the original's hard cuts). The bindings table (surface input → slot or 
 range map) is a versioned JSON resource loaded at startup and hot-reloadable — remapping an
 axis is data, not code.
 
+**Deviation (Task 11):** `ControlSurface.poll` takes `TimeInterval`, not `FrameContext`.
+Surfaces need only a clock to time their own gestures/ramps, not textures or a command
+buffer, and `TimeInterval` keeps them constructible and testable without Metal. `ControlWrite`
+also gained an `eraseStep: Float?` field beyond what's shown above — a relative nudge to
+`ControlRouter.eraseControl`, applied immediately and clamped to 0...1 (erase stays outside
+the 9-slot vector and never ramped, per §01 §2).
+
 The performer's baseline is local hardware, present from P1 — the original gave the performer
 ~7 continuous axes plus booleans, and that must not wait for exotic surfaces:
 
