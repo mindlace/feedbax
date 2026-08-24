@@ -22,15 +22,22 @@ public final class StickerSource: SeedSource {
 
   // Placement/gating defaults mirror the original patch's picsvid layer at load:
   // - `zOrder = 2` is `LayerSettings`'s own default (spec §02 §1's `jit.gl.layer @layer 2`).
-  // - `enabled = false` is `LayerSettings`'s own default ("pic enable" starts off, spec §04
-  //   §1.4) — nothing draws until the UI turns this layer on.
-  // - `scale = (0.747, 0.747)` is the pic-size slider's startup value (Constants table);
+  // - `enabled = false` is `LayerSettings`'s own default ("pic enable" starts explicitly off
+  //   via `loadmess 0`, spec §04 §1.4's toggle table) — nothing draws until the UI turns this
+  //   layer on.
+  // - `scale = (0.747, 0.747)` is the "pic-size" slider's persisted load value (spec §04
+  //   §1.4's per-control table: `pic-size | slider[12] | imageMove[4]/[5] | 0.747`);
   //   position/rotation stay at `LayerTransform`'s own zero defaults.
   public var transform = LayerTransform(scale: SIMD2<Float>(0.747, 0.747))
   public var layer = LayerSettings()
 
-  /// Extensions this source scans for — the image half of the original's file-type filter
-  /// (spec §02 §1's types list); movie extensions (mov/mp4/m4v/...) are `MovieSource`'s.
+  /// Extensions this source scans for. The original umenu's `types` filter (spec §02 §1) is
+  /// `["MooV","MPEG","mpg4","VfW","WMV","PICT","PNG","GIFf","TIFF","BMP"]` — movies and
+  /// stills mixed in one list, PICT included (a legacy Mac format with no modern decoder).
+  /// This is the still-image subset re-expressed as file extensions, movies dropped
+  /// (`MovieSource`, Task 16, owns those) and PICT swapped for the still formats CoreGraphics
+  /// actually decodes today (jpg/jpeg/heic) — same intent as the original filter, not a
+  /// literal transcription of it.
   private static let imageExtensions: Set<String> =
     ["png", "gif", "tif", "tiff", "bmp", "jpg", "jpeg", "heic"]
 
