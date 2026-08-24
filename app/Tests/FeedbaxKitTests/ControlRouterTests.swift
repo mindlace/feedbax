@@ -57,5 +57,17 @@ final class ControlRouterTests: XCTestCase {
     r.eraseControl = 1.0
     r.apply(ControlWrite(eraseStep: -0.05), at: 0)
     XCTAssertEqual(r.eraseControl, 0.95, accuracy: 1e-5)
+
+    // Upper bound: a step that would overshoot 1 clamps at the ceiling, not overshoot/wrap.
+    let upper = ControlRouter()
+    upper.eraseControl = 0.98
+    upper.apply(ControlWrite(eraseStep: 0.5), at: 0)
+    XCTAssertEqual(upper.eraseControl, 1.0, accuracy: 1e-5, "eraseStep clamps at the ceiling")
+
+    // Lower bound: a step that would undershoot 0 clamps at the floor.
+    let lower = ControlRouter()
+    lower.eraseControl = 0.02
+    lower.apply(ControlWrite(eraseStep: -0.5), at: 0)
+    XCTAssertEqual(lower.eraseControl, 0.0, accuracy: 1e-5, "eraseStep clamps at the floor")
   }
 }
