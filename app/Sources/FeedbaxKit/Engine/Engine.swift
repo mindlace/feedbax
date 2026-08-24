@@ -85,11 +85,6 @@ public final class Engine {
 
   private var frameIndex = 0
 
-  /// The accumulator's pixel format — shared by `FeedbackCore`, the compositor's
-  /// `QuadRenderer`, and `WaveformRenderer` (Task 18's ruling: a render pipeline's color-
-  /// attachment format is fixed at build time, so every draw target sharing one render pass
-  /// must agree, or Metal validation fails at draw time, not at pipeline-creation time).
-  private static let accumulatorFormat: MTLPixelFormat = .rgba8Unorm
   /// Cold-start canvas: 1080p — the resolution `fst`'s creation string defaults to, and the
   /// one no `loadmess` ever overrides at patch load (spec §01 §1).
   private static let defaultResolution = SIMD2(1920, 1080)
@@ -135,9 +130,19 @@ public final class Engine {
   /// claimed `AudioAnalysis` reconstructs `AudioBands` internally at the hardware rate; it
   /// does not — `AudioAnalysis.init(bands:)` takes an already-built `AudioBands` and never
   /// replaces it).
-  public init(context: MetalContext, audioSampleRate: Float = 48000) throws {
+  ///
+  /// `accumulatorFormat` — shared by `FeedbackCore`, the compositor's `QuadRenderer`, and
+  /// `WaveformRenderer` (Task 18's ruling: a render pipeline's color-attachment format is
+  /// fixed at build time, so every draw target sharing one render pass must agree, or Metal
+  /// validation fails at draw time, not at pipeline-creation time) — defaults to `.rgba8Unorm`,
+  /// the original's effective depth (design §4's "RGBA8 accumulator by default"). Exposed as an
+  /// init parameter, not hardcoded, so the RGBA16F quality-toggle headroom design §4 calls out
+  /// ("RGBA16F as a quality toggle where bandwidth allows") is actually reachable — currently
+  /// by `feedbax-dev --soak --accumulator-format rgba16f` (Task 24); no live UI toggle yet.
+  public init(context: MetalContext, audioSampleRate: Float = 48000,
+              accumulatorFormat: MTLPixelFormat = .rgba8Unorm) throws {
     self.context = context
-    let format = Engine.accumulatorFormat
+    let format = accumulatorFormat
     let size = Engine.defaultResolution
     self.resolution = size
 
