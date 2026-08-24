@@ -38,14 +38,19 @@ final class WaveformTests: XCTestCase {
   /// off-screen/degenerate draw.
   func testDrawProducesVisiblePixels() throws {
     let ctx = try MetalContext()
-    let renderer = try WaveformRenderer(context: ctx)
+    // Pipelines must match their render target's format (WaveformRenderer.init's doc
+    // comment) — pass the same format the test's own target texture uses below, not a
+    // hardcoded guess, exactly as a real caller (Compositor, drawing into FeedbackCore's
+    // accumulator) must.
+    let targetFormat: MTLPixelFormat = .rgba16Float
+    let renderer = try WaveformRenderer(context: ctx, pixelFormat: targetFormat)
     renderer.wave1Enabled = true
     renderer.wave2Enabled = true
     renderer.wave2BaseAlpha = 0.5
 
     let size = 64
     let target = ctx.device.makeTexture(descriptor: {
-      let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: size, height: size, mipmapped: false)
+      let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: targetFormat, width: size, height: size, mipmapped: false)
       d.usage = [.renderTarget, .shaderRead]
       d.storageMode = .shared
       return d

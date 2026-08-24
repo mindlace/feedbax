@@ -78,14 +78,18 @@ public final class WaveformRenderer {
   private let pointPipeline: MTLRenderPipelineState
   private let device: MTLDevice
 
-  /// Both pipelines target `.rgba16Float` — the format used for filter-chain intermediates
-  /// and every `TexturePool` lease elsewhere in the engine (design §5; e.g.
-  /// `WarpPass.encode`'s own lease). This task's interface takes no `pixelFormat`
-  /// parameter (unlike `QuadRenderer`, which is threaded one explicitly) — if a future
-  /// wiring composites this overlay into an accumulator of a *different* format (
-  /// `FeedbackCore`'s own default is `.rgba8Unorm`), the render-pipeline/render-pass format
-  /// must be reconciled there; flagged here rather than guessed silently.
-  public init(context: MetalContext) throws {
+  /// A `MTLRenderPipelineState`'s color-attachment pixel format is fixed at build time and
+  /// must match whatever render pass it's later encoded into — mismatched formats fail
+  /// Metal API validation at draw time, not at pipeline-creation time, so this can't be
+  /// papered over with a convenient guess. `draw()` runs as a `Compositor.overlays` entry
+  /// *inside* `FeedbackCore`'s own seeds render pass, drawing straight into the ping-pong
+  /// accumulator — so `pixelFormat` here must be the accumulator's actual format: `FeedbackCore`'s
+  /// own default is `.rgba8Unorm`, with `.rgba16Float` available under the quality-toggle
+  /// variant (design §4's "RGBA16F-accumulator" headroom option). No default value is
+  /// offered on this parameter (unlike `QuadRenderer`'s own `pixelFormat` parameter, which
+  /// carries the same precedent) — the caller always knows its target format, and guessing
+  /// wrong here is a silent landmine, not a loud one.
+  public init(context: MetalContext, pixelFormat: MTLPixelFormat) throws {
     func function(_ name: String) throws -> MTLFunction {
       guard let fn = context.libraries.compactMap({ $0.makeFunction(name: name) }).first else {
         throw FeedbaxError.missingShader(name)
@@ -93,7 +97,7 @@ public final class WaveformRenderer {
       return fn
     }
     device = context.device
-    let format: MTLPixelFormat = .rgba16Float
+    let format = pixelFormat
 
     let ribbonDesc = MTLRenderPipelineDescriptor()
     ribbonDesc.vertexFunction = try function("fbx_ribbon_v")
