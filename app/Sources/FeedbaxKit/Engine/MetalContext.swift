@@ -106,4 +106,11 @@ public final class MetalContext {
   }
 }
 
-public enum FeedbaxError: Error { case noMetalDevice, missingShader(String) }
+public enum FeedbaxError: Error {
+  case noMetalDevice
+  case missingShader(String)
+  case failedToCreateImageDestination
+  case failedToWriteImage
+  case failedToCreateDataProvider
+  case failedToCreateCGImage
+}

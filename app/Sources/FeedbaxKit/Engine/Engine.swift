@@ -273,8 +273,21 @@ public final class Engine {
       // enable state the performer just set.
       sticker.layer.enabled = on
       movie.layer.enabled = on
-    case .fullscreen, .stillCapture:
-      break   // one-shot UI actions — `PreviewView` (fullscreen) / Task 24 (`StillCapture`)
+    case .fullscreen:
+      break   // one-shot UI action — `PreviewView` (fullscreen)
+    case .stillCapture:
+      // Task 21: write the current accumulator to ~/Pictures/Feedbax/ as a dated PNG.
+      // This happens asynchronously and failures are logged, never crash the render loop.
+      do {
+        let defaultDir = FileManager.default.urls(for: .picturesDirectory,
+                                                  in: .userDomainMask)[0]
+          .appendingPathComponent("Feedbax")
+        _ = try StillCapture.write(core.accumulator, context: context, directory: defaultDir,
+                                   date: Date())
+      } catch {
+        // Log failure but don't crash the render loop (design §10, spec §04 §6).
+        print("Still capture failed: \(error)")
+      }
     case .sInvert:
       break   // unreachable: `ControlRouter.mergeAndProcess` never forwards this one
     }
