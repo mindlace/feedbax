@@ -76,7 +76,8 @@ kernel void fbx_warp_hsl(texture2d<float, access::sample> prev [[texture(0)]],
   if (p.nearest != 0) {
     // Nearest texel as an exact read, not a sampler: a shrunk 1-px line keeps its full
     // value instead of being averaged with its neighbours (diagnosis doc, term 1). fold2
-    // already keeps `src` inside [0, size); the clamp is belt-and-braces.
+    // returns exactly `size` when `wrapped == 0` on the reflected half-period, so the clamp
+    // is load-bearing on that boundary (the CPU reference clamps identically).
     uint2 texel = uint2(clamp(floor(src), float2(0.0), size - 1.0));
     color = prev.read(texel);
   } else {

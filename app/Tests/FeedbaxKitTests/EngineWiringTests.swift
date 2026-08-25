@@ -240,7 +240,7 @@ final class EngineWiringTests: XCTestCase {
   /// Four renders of the same audio-fed frame, differing only in the two `wave*Enabled`
   /// flags, and every pairwise comparison that should differ, differs:
   ///   - wave 1 alone ≠ nothing drawn   (wave 1's ribbon is on the path)
-  ///   - wave 2 alone ≠ nothing drawn   (wave 2's point sprites are too — a separate pipeline
+  ///   - wave 2 alone ≠ nothing drawn   (wave 2's ring is too — a separate pipeline
   ///                                     with a different blend mode, spec §03 §5)
   ///   - both ≠ either alone            (they COEXIST; neither draw suppresses the other)
   /// The waveform geometry itself is `WaveformTests`' business; this is purely "both reach

@@ -92,12 +92,14 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   /// `size 2, min −1` (raw = internal − 1) except SATURATION (`size 1`, raw = internal); the
   /// rotate fader is negated into slot 6 by `* -1.`, so its reading is `1 − raw`. Shown next
   /// to each slider so "the same settings as Max" can be dialled in by number
-  /// (docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md).
+  /// (docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md). PAN X/PAN Y were
+  /// touch-only in the original — no fader, no number box — so there is no panel convention
+  /// to match; they pass `raw` through unchanged.
   public static func maxPanelValue(for slot: ControlSlot, raw: Double) -> Double {
     switch slot {
-    case .saturation: return raw
+    case .saturation, .panX, .panY: return raw
     case .theta: return 1 - raw
-    default: return raw + 1
+    case .hue, .bias, .zoom, .scalebright, .nc: return raw + 1
     }
   }
 

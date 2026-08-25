@@ -70,6 +70,8 @@ public final class AudioBands {
 
   /// RMS of the most recent `ingest` batch (~23 ms at a 1024-sample tap) — the HUD's input
   /// meter. The app has no other way to tell "no audio arrives" from "the ring is static".
+  /// Measured after `AudioAnalysis.inputGain` is applied (post-gain), so the HUD reads the
+  /// level the analysis actually sees.
   private var lastInputRMS: Float = 0
   public var inputRMS: Float {
     lock.lock(); defer { lock.unlock() }
@@ -204,7 +206,7 @@ public final class AudioAnalysis {
   private let tapBus: AVAudioNodeBus = 0
   private var isRunning = false
 
-  public init(bands: AudioBands) throws {
+  public init(bands: AudioBands) {
     self.bands = bands
   }
 

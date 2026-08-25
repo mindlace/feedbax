@@ -121,4 +121,48 @@ final class WaveformTests: XCTestCase {
     XCTAssertTrue(hasPixel(near: wave1Expected, tol: 0.02), "expected wave 1's burnt-orange line")
     XCTAssertTrue(hasPixel(near: wave2Expected, tol: 0.02), "expected wave 2's cyan ring")
   }
+
+  /// Pins the data→geometry wiring `draw` performs (which array feeds which shape): a wave-1
+  /// deflection must light the bottom of the canvas and nothing near the centre; wave 2 alone
+  /// must light a ring around the centre and nothing at the bottom edge.
+  func testDrawRoutesWave1ToTheBottomEdgeAndWave2ToTheRing() throws {
+    let ctx = try MetalContext()
+    let size = 64
+    func render(wave1: [Float]?, wave2: [Float]?) throws -> [SIMD4<Float>] {
+      let renderer = try WaveformRenderer(context: ctx, pixelFormat: .rgba16Float)
+      renderer.wave1Enabled = wave1 != nil
+      renderer.wave2Enabled = wave2 != nil
+      let target = ctx.device.makeTexture(descriptor: {
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: size, height: size, mipmapped: false)
+        d.usage = [.renderTarget, .shaderRead]; d.storageMode = .shared; return d
+      }())!
+      let cb = ctx.queue.makeCommandBuffer()!
+      let frame = FrameContext(index: 0, time: 0, delta: 1 / 60, canvasSize: SIMD2(size, size),
+                               commandBuffer: cb, pool: ctx.pool)
+      let rp = MTLRenderPassDescriptor()
+      rp.colorAttachments[0].texture = target
+      rp.colorAttachments[0].loadAction = .clear
+      rp.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+      rp.colorAttachments[0].storeAction = .store
+      let enc = cb.makeRenderCommandEncoder(descriptor: rp)!
+      let audio = FrameAudio(worldBump: 0, waveBumpRaw: 0, kittyBumpRaw: 0,
+                             wave1Points: wave1 ?? [Float](repeating: 0, count: 512),
+                             wave2Points: wave2 ?? [Float](repeating: 0, count: 1024))
+      renderer.draw(enc, frame: frame, audio: audio, projection: Compositor.projection(canvasAspect: 1))
+      enc.endEncoding(); cb.commit(); cb.waitUntilCompleted()
+      return ctx.readPixels(target)
+    }
+    func lit(_ px: [SIMD4<Float>], rows: Range<Int>, cols: Range<Int>) -> Bool {
+      rows.contains { y in cols.contains { x in px[y * size + x].w > 0 } }
+    }
+    // Wave 1 deflected +0.2 sits at y = −0.65 → the lower part of the frame (row 0 is the top).
+    let one = try render(wave1: [Float](repeating: 0.2, count: 512), wave2: nil)
+    XCTAssertTrue(lit(one, rows: 40..<64, cols: 0..<64), "wave 1 must light the lower frame")
+    XCTAssertFalse(lit(one, rows: 28..<36, cols: 28..<36), "wave 1 must not touch the centre")
+    // Wave 2's ring (radius 0.7 at z = −2 → ~0.42 of the half-height) surrounds the centre.
+    let two = try render(wave1: nil, wave2: [Float](repeating: 0, count: 1024))
+    XCTAssertTrue(lit(two, rows: 0..<32, cols: 0..<64), "wave 2's ring must reach the upper half")
+    XCTAssertFalse(lit(two, rows: 30..<34, cols: 30..<34), "wave 2 must not fill the centre")
+    XCTAssertFalse(lit(two, rows: 62..<64, cols: 0..<64), "wave 2 must not touch the bottom edge")
+  }
 }

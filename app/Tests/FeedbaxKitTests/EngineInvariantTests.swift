@@ -70,11 +70,13 @@ final class EngineInvariantTests: XCTestCase {
   /// signal for a variance floor.
   private static let size = SIMD2<Int>(192, 108)
 
-  /// 600 frames = 10 s at 60 Hz. The historical whiteout was total inside ~90 frames, but a
+  /// 900 frames = 15 s at 60 Hz. The historical whiteout was total inside ~90 frames, but a
   /// slow-integrating variant of the same bug (a lightness delta only slightly positive)
   /// needs a long run to show, so the invariant run is deliberately far longer than the
-  /// failure it was written for. Measured cost of the whole run: ~1.9 s.
-  private static let frameCount = 600
+  /// failure it was written for. The parity loop (nearest resample) reaches its fixed point
+  /// at ~frame 520 of this run, so 900 frames gives ~380 settled frames to assert against.
+  /// Measured cost: ~2.9 s.
+  private static let frameCount = 900
 
   // MARK: - The shared startup run
 
@@ -125,7 +127,7 @@ final class EngineInvariantTests: XCTestCase {
   /// (docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md; the whiteout write-up's
   /// own reframing: clipping is the instrument's bounded nonlinearity, and "never clips
   /// while a seed is permanently drawn" is deliberately not asserted). Measured on the parity
-  /// loop: 0.09 % of pixels clipped by frame 575, none before frame 574.
+  /// loop: first clipped frame 12, peak 0.21 % at ~frame 446, settled ~0.21 %.
   ///
   /// Threshold: `whiteFraction` below 1 % on every frame. The bug's signature is 100 %; a
   /// convergence point on a 192×108 canvas is a few dozen pixels (< 0.3 %). Not fitted —
@@ -140,28 +142,36 @@ final class EngineInvariantTests: XCTestCase {
     }
   }
 
-  // MARK: - 2. Bounded, not integrating
+  // MARK: - 2. Converges to a fixed point, and is bounded on the way there
 
   /// **Guards: an integrator that never settles.** Under the bug the mean climbed
-  /// monotonically at ~0.01 per frame until it hit the clip ceiling. A correct loop's mean
-  /// stays bounded: the negative `bias` lightness delta retires every generation of content
-  /// after ~66 frames at the startup vector, so nothing can integrate without limit.
+  /// monotonically at ~0.01 per frame until it hit the clip ceiling. A correct loop is a
+  /// contraction: the negative `bias` lightness delta retires every generation of content
+  /// (~66 frames at the startup vector), so the mean reaches an equilibrium and stops.
   ///
-  /// This used to assert frame-to-frame stationarity below 1e-5 from the halfway point —
-  /// measured under bilinear resampling, which blurred every generation away within ~15
-  /// frames and left a dead-still fixed point by frame 240. The parity loop reads the
-  /// nearest texel (diagnosis doc, term 1): generations survive until the lightness term
-  /// retires them, each lands on a slightly different pixel set as it rotates, and the mean
-  /// keeps creeping (measured +4.7e-5 per frame over frames 300–600) while the content keeps
-  /// evolving — which the original does too ("takes much longer to settle" is one of the
-  /// owner's reports). Stationarity to 1e-5 is therefore not a property of the instrument;
-  /// boundedness is (written argument, per this file's header).
-  ///
-  /// Threshold: the mean over the last 100 frames may exceed the mean over frames 300–400 by
-  /// at most 0.05. The bug moves 0.05 in five frames; the parity loop's measured drift moves
-  /// it ~0.01 over that span. Not fitted — an order of magnitude each way.
-  func testMeanLuminanceIsBoundedNotIntegrating() throws {
+  /// Two assertions. (a) Frame-to-frame stationarity below 1e-5 from `settleBy` on — 1e-5 is
+  /// ~1/400th of one 8-bit step, "no longer moving at a rate the accumulator can represent".
+  /// Under bilinear resampling this held from frame ~240; the parity loop reads the nearest
+  /// texel (diagnosis doc, term 1), every generation survives until the lightness term
+  /// retires it, and the run reaches a bit-exact fixed point only at frame ~520 (measured on
+  /// the branch tip; |Δmean| < 1e-5 from frame 518 on, then exactly 0). `settleBy` = 600 leaves
+  /// an 80-frame margin past that and 300 settled frames under assertion. (b) The mean over the
+  /// last 100 frames may exceed the mean over frames 300–400 by at most 0.05 — a coarse
+  /// integrator bound that does not depend on where the fixed point lands: the bug moves 0.05
+  /// in five frames, the parity loop's measured rise over that span is ~0.010. Not fitted —
+  /// an order of magnitude each way.
+  func testMeanLuminanceConvergesToAFixedPoint() throws {
     let run = Self.startupRun
+    let settleBy = 600
+    let epsilon = 1e-5
+    for i in settleBy..<run.count {
+      let delta = abs(run[i].mean - run[i - 1].mean)
+      XCTAssertLessThan(delta, epsilon,
+        "frame \(i): mean luminance is still moving by \(delta) per frame after \(settleBy) " +
+        "frames (limit \(epsilon)). The loop has not converged — it is drifting toward one " +
+        "of its rails. mean=\(run[i].mean), previous=\(run[i - 1].mean)")
+    }
+
     func windowMean(_ range: Range<Int>) -> Double {
       range.reduce(0.0) { $0 + run[$1].mean } / Double(range.count)
     }
@@ -172,19 +182,19 @@ final class EngineInvariantTests: XCTestCase {
       "loop is integrating toward the white rail rather than holding a bounded steady state")
 
     // A degenerate collapse (all black) or a saturated rail (all white) is also perfectly
-    // "bounded", so pin the steady state into a plausible open interval. The bounds are
+    // "converged", so pin the equilibrium into a plausible open interval. The bounds are
     // deliberately loose — they only exclude the two rails.
     let equilibrium = run[run.count - 1].mean
     XCTAssertGreaterThan(equilibrium, 0.02,
-      "settled at mean luminance \(equilibrium) — the loop has collapsed to (near) black")
+      "converged to mean luminance \(equilibrium) — the loop has collapsed to (near) black")
     XCTAssertLessThan(equilibrium, 0.98,
-      "settled at mean luminance \(equilibrium) — the loop has pinned at (near) white")
+      "converged to mean luminance \(equilibrium) — the loop has pinned at (near) white")
   }
 
   // MARK: - 3. Bounded
 
   /// **Guards: both rails, on every frame — including the transient.** Invariant 2 only
-  /// compares two late windows; bug 3's 6-frame all-white overshoot happened at frames 3–6
+  /// looks at the settled tail; bug 3's 6-frame all-white overshoot happened at frames 3–6
   /// and was gone by frame 10, so a tail-only test sails straight past it. This one checks
   /// every single frame from the very first.
   ///

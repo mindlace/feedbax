@@ -141,7 +141,8 @@ public final class MetalHostView: NSView {
     let now = CACurrentMediaTime()
     let accumulator = engine.step(at: now, commandBuffer: commandBuffer)
     let drawableSize = SIMD2(Int(metalLayer.drawableSize.width), Int(metalLayer.drawableSize.height))
-    let inputDB = Int(AudioBands.decibels(engine.bands.inputRMS).rounded())
+    let db = AudioBands.decibels(engine.bands.inputRMS)
+    let inputDB = db.isFinite ? Int(max(-90, min(20, db)).rounded()) : -90
     outputStage.draw(accumulator: accumulator, into: update.drawable, commandBuffer: commandBuffer,
                      drawableSize: drawableSize,
                      statusLine: "\(engine.audioStatus)   in \(inputDB) dB")

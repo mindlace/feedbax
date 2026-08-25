@@ -25,6 +25,7 @@ final class EngineViewModelTests: XCTestCase {
     XCTAssertEqual(EngineViewModel.maxPanelValue(for: .zoom, raw: -0.25), 0.75, accuracy: 1e-9)
     XCTAssertEqual(EngineViewModel.maxPanelValue(for: .theta, raw: 0.26092), 0.73908, accuracy: 1e-6)
     XCTAssertEqual(EngineViewModel.maxPanelValue(for: .saturation, raw: 0.5), 0.5, accuracy: 1e-9)
+    XCTAssertEqual(EngineViewModel.maxPanelValue(for: .panX, raw: 0.3), 0.3, accuracy: 1e-9)
   }
   func testToggleEmitsEvent() {
     let vm = EngineViewModel()

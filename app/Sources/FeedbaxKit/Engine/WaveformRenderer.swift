@@ -36,8 +36,10 @@ public struct WaveformStyle {
   /// Wave 2 ("Circle", obj-213): the RING — `loadmess 1 → prepend radial`, `radialradius 0.7`
   /// (`loadmess 0.7 → slider → pak radialradius`), `line_width 4`, `position 0 0 −2`,
   /// `scale 1 1 1`, colour from `swatch[238]`, `blend_mode 6 8` (src_alpha, dst_alpha). Drawn
-  /// as an ellipse with the canvas aspect — measured off the render window, where the ring's
-  /// radius is the same fraction of the half-width and of the half-height.
+  /// as an ellipse in frame-normalised coordinates per the diagnosis doc's fix-plan item 3
+  /// (docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md) — measured off the render
+  /// window, where the ring's radius is the same fraction of the half-width and of the
+  /// half-height, matching the screenshot ratio.
   public static let wave2 = WaveformStyle(
     position: SIMD3(0, 0, -2), scale: SIMD3(1, 1, 1),
     lineWidthPx: 4, radialRadius: 0.7,

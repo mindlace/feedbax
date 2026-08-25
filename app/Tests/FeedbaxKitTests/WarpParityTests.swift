@@ -6,6 +6,10 @@ import simd
 /// land near-gray, where hue is ill-conditioned and half-precision input quantization
 /// legitimately exceeds the tolerance — a fixed seed pins us to a known-good draw while
 /// keeping the strict 0.02 bound. (Golden-frame scenarios in Task 22 are the broad net.)
+/// Under nearest sampling a 1-ULP difference in `rotaSource` across an integer boundary
+/// would select a different texel of random data, far outside 0.02 — the parity holds
+/// because both sides compute the coordinate identically; a divergent Metal compiler would
+/// show up here as a whole-texel miss, not a rounding error.
 struct SplitMix64: RandomNumberGenerator {
   var state: UInt64
   mutating func next() -> UInt64 {

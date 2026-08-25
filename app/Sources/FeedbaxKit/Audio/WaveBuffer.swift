@@ -33,12 +33,9 @@ struct WaveBuffer {
     return Array(storage[writeIndex...]) + Array(storage[..<writeIndex])
   }
 
-  /// Ports `jit.catch~`'s `@downsample` (spec §03 §4): keep every `stride`-th sample of the
-  /// chronological snapshot. `stride` 2 → 512 points (wave 1); `stride` 512 → 2 points (wave
-  /// 2 — anomalously coarse next to wave 1's ×2). Verified against the running patch (Task
-  /// 25, spec §03 §12 q.2): wave 2's rendered shape did not change under a full-mic-mute or
-  /// loud-transient A/B test, consistent with this coarse decimation rather than a dense
-  /// audio-reactive line — left as-is, no contradicting observation.
+  /// Ports `jit.catch~`'s `@downsample` for wave 1 (spec §03 §4): keep every `stride`-th
+  /// sample of the chronological snapshot — `stride` 2 → 512 points. Wave 2 uses
+  /// `AveragingWaveBuffer` below.
   func strideDecimated(by stride: Int) -> [Float] {
     let full = snapshot()
     guard stride > 0 else { return full }
@@ -51,6 +48,10 @@ struct WaveBuffer {
 /// wave 2's path (`loadmess 512 → downsample 512 → s wave2cmd`, `framesize 1024`): a 1024-cell
 /// ring of 512-sample means, which is why the ring stays near-circular under a 60 Hz band
 /// (diagnosis doc, "Audio couplings"; the exact history depth is flagged [measure] there).
+/// 1024 cells × 512 samples ≈ 11.9 s of history at 44.1 kHz: for the first ~12 s after launch
+/// the front of the ring is zero-padded (a perfect circle over most of its circumference), and
+/// only ~1.4 cells change per 60 Hz frame — which is the "near-static ring" the diagnosis
+/// predicts.
 struct AveragingWaveBuffer {
   private var ring: WaveBuffer
   private let group: Int

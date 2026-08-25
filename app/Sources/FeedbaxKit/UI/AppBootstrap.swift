@@ -20,14 +20,14 @@ public final class AppBootstrap {
 
   /// Kept alive purely so ARC doesn't tear down the mic tap the instant `start()` returns —
   /// nothing reads this property directly; `AudioBands` (owned by `engine`) is the interface
-  /// analysis results actually flow through. Optional because starting it is best-effort: a
-  /// machine with no input device, or a user who denies mic permission, still gets a working
-  /// (silent) instrument rather than a crash.
-  private let audioAnalysis: AudioAnalysis?
+  /// analysis results actually flow through. `AudioAnalysis.init` cannot fail (it just stores
+  /// `bands`); starting it is what's best-effort — a machine with no input device, or a user
+  /// who denies mic permission, still gets a working (silent) instrument rather than a crash.
+  private let audioAnalysis: AudioAnalysis
 
   private init(
     engine: Engine, keyboardSurface: KeyboardTrackpadSurface, viewModel: EngineViewModel,
-    audioAnalysis: AudioAnalysis?
+    audioAnalysis: AudioAnalysis
   ) {
     self.engine = engine
     self.keyboardSurface = keyboardSurface
@@ -85,10 +85,10 @@ public final class AppBootstrap {
     // must stay pure and injectable for the determinism test/golden harness). `AudioAnalysis` is
     // the one place this codebase touches `AVAudioEngine`, and it only ever starts here, when a
     // real entry point runs — never in a test.
-    let audioAnalysis = try? AudioAnalysis(bands: engine.bands)
+    let audioAnalysis = AudioAnalysis(bands: engine.bands)
     do {
-      try audioAnalysis?.start()
-      engine.audioStatus = audioAnalysis?.statusText ?? "mic: unavailable"
+      try audioAnalysis.start()
+      engine.audioStatus = audioAnalysis.statusText
     } catch {
       // A missing device or a denied permission must be VISIBLE (HUD), not a silent instrument.
       engine.audioStatus = "mic FAILED: \(error.localizedDescription)"

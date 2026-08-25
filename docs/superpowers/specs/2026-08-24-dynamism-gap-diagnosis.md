@@ -108,6 +108,7 @@ hue drifting through the whole wheel — is the Max frame. The spec's own audit 
 | unclamped HSL only | 0.016 | 0.033 | 78 % | 0 | 0.0040 | 32 frames | yes |
 | nearest only | 0.034 | 0.074 | 66 % | 0.2 % | 0.031 (5×) | 55 frames, tail ~1e-3 at 300 | never exactly 0 |
 | nearest + unclamped HSL | 0.21 ↑ | 0.44 ↑ | 33 % ↓ | 29 % | 0.24 | — | none: still filling at 300 |
+| **branch tip (nearest + unclamped HSL + parity seeds), 192×108, 900 frames** | 0.58 | — | — | 0.21 % | — | fixed point at ~520 | yes |
 
 Vectors alone, and 8-bit rounding, are ruled out. Nearest alone gives the fine detail and the
 long settling tail but a dark frame. Only the two terms together reach the Max regime — a
@@ -117,6 +118,11 @@ still climbing at frame 300 (the Max window had been running for minutes). PNGs:
 `max_shot1_nearest_noclamp_f300.png`. The combined run's field is random confetti rather than
 Max's structured mesh because the port's seeds have the wrong geometry (next section); it is
 not evidence against the mechanism.
+
+Measured at the branch tip after the fixes: mean luminance 0.58 and 0.21 % clipped, settling
+to a bit-exact fixed point at ~frame 520 with nearest sampling versus 0 % clipped under linear
+— against Max's 0.49 / 4.5 % / never; the remaining gap is the like-for-like visual check and
+the three Max-side measurements.
 
 ## Audio couplings — what the "ring" and the "bass background" are
 
@@ -168,6 +174,8 @@ Verified from `patches/feedbax.sound2.maxpat` listings and Max refpages:
    hsl2rgb`, read back; compare with the clamped and unclamped formulas.
 3. `jit.gl.graph` line width and value→y scale under glcore; `jit.catch~` output dim at
    `downsample 512`.
+4. Whether `jit.gl.graph`'s radial mode draws a circle in world units or an ellipse in
+   frame-normalised coordinates (the port draws the ellipse the screenshot shows).
 
 ## Corrections owed to `docs/spec`
 
