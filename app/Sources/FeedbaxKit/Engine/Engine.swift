@@ -77,6 +77,10 @@ public final class Engine {
   /// only so the two can be A/B'd live from the operator panel.
   public var warpFilter: WarpFilter = .nearest
 
+  /// One-line capture status for the HUD, set by whoever starts `AudioAnalysis`
+  /// (`AppBootstrap`). Not engine state — the engine never touches the microphone.
+  public var audioStatus = "mic: not started"
+
   /// Current canvas size — what `setResolution` changes and what every frame's `FrameContext
   /// .canvasSize` carries. Read-only from outside `Engine`; the only way to change it is
   /// `setResolution`, which also reallocates the accumulator (`FeedbackCore.resize`).

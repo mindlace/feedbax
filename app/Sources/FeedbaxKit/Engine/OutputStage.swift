@@ -66,7 +66,8 @@ public final class OutputStage {
   /// Draws `accumulator` aspect-fit into `drawable`, then the HUD overlay (if enabled), and
   /// presents. Owns the whole render pass for this call — callers just `commit()` afterward.
   public func draw(accumulator: MTLTexture, into drawable: CAMetalDrawable,
-                   commandBuffer: MTLCommandBuffer, drawableSize: SIMD2<Int>) {
+                   commandBuffer: MTLCommandBuffer, drawableSize: SIMD2<Int>,
+                   statusLine: String? = nil) {
     let rp = MTLRenderPassDescriptor()
     rp.colorAttachments[0].texture = drawable.texture
     rp.colorAttachments[0].loadAction = .clear
@@ -80,7 +81,7 @@ public final class OutputStage {
                       tint: SIMD4(1, 1, 1, 1), blend: .none)
 
     if hudEnabled {
-      updateHUDIfDue()
+      updateHUDIfDue(statusLine: statusLine)
       if let hudTexture, hudPixelSize.x > 0, hudPixelSize.y > 0 {
         let hudTransform = OutputStage.hudCornerTransform(hudPixelSize: hudPixelSize, drawableSize: drawableSize)
         quad.drawTextured(enc, texture: hudTexture, transform: hudTransform,
@@ -124,12 +125,12 @@ public final class OutputStage {
     return translate * scale
   }
 
-  private func updateHUDIfDue() {
+  private func updateHUDIfDue(statusLine: String?) {
     let now = CACurrentMediaTime()
     guard now - lastHUDUpdate >= Self.hudUpdateInterval else { return }
     guard let (p50, p99) = OutputStage.percentiles(frameTimes) else { return }
     lastHUDUpdate = now
-    let text = String(format: "p50 %.1f ms   p99 %.1f ms", p50 * 1000, p99 * 1000)
+    let text = OutputStage.hudText(p50: p50, p99: p99, status: statusLine)
     if let rendered = OutputStage.renderTextTexture(text, context: context) {
       hudTexture = rendered.texture
       hudPixelSize = rendered.size
@@ -148,6 +149,14 @@ public final class OutputStage {
       return sorted[index]
     }
     return (rank(0.50), rank(0.99))
+  }
+
+  /// The HUD line: frame-time percentiles plus an optional status (mic capture, input level).
+  /// Pure so it needs no GPU to test.
+  static func hudText(p50: Double, p99: Double, status: String?) -> String {
+    let timing = String(format: "p50 %.1f ms   p99 %.1f ms", p50 * 1000, p99 * 1000)
+    guard let status, !status.isEmpty else { return timing }
+    return timing + "   " + status
   }
 
   /// Rasterizes `text` into a small RGBA texture via `NSAttributedString`/`CGContext` — the

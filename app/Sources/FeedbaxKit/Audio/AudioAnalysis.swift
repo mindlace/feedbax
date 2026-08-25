@@ -68,6 +68,20 @@ public final class AudioBands {
   private var kittyBumpSum: Float = 0
   private var kittyBumpCount: Int = 0
 
+  /// RMS of the most recent `ingest` batch (~23 ms at a 1024-sample tap) — the HUD's input
+  /// meter. The app has no other way to tell "no audio arrives" from "the ring is static".
+  private var lastInputRMS: Float = 0
+  public var inputRMS: Float {
+    lock.lock(); defer { lock.unlock() }
+    return lastInputRMS
+  }
+
+  /// dBFS of an RMS level, floored at −90 dB (silence).
+  public static func decibels(_ rms: Float) -> Float {
+    guard rms > 0 else { return -90 }
+    return max(-90, 20 * log10(rms))
+  }
+
   private var wave1Ring: WaveBuffer
   private var wave2Ring: AveragingWaveBuffer
   // One persistent SlideEnvelope per decimated wave-1 point — `jit.slide`'s per-cell
@@ -99,6 +113,11 @@ public final class AudioBands {
   public func ingest(_ samples: [Float]) {
     lock.lock()
     defer { lock.unlock() }
+    if !samples.isEmpty {
+      var sumSq: Float = 0
+      for s in samples { sumSq += s * s }
+      lastInputRMS = sqrt(sumSq / Float(samples.count))
+    }
     for s in samples {
       // worldBump (spec §03 §7a): biquad → abs → slide(2500/2500) → runningAvg(absolute,100).
       // The running average's *last* value is what `frameValues()` snapshots — this is
@@ -172,6 +191,9 @@ public final class KittyBumpReceiver {
 /// microphone — so its tap-format and start/stop behavior have only been reasoned about, not
 /// exercised; treat it as needing a manual/live smoke test before relying on it.
 public final class AudioAnalysis {
+  /// What the HUD shows for the capture: the tap's format once started, or why it isn't.
+  public private(set) var statusText = "mic: not started"
+
   /// `uiGain` (spec §03 §2): a raw multiply on the tapped samples, applied before
   /// `AudioBands.ingest`. Deliberately **unsmoothed** — the original's `*~ 1.` cold-inlet
   /// gain has no `mIniCtlSmooth` ramp, unlike most other webUI-driven controls.
@@ -201,11 +223,18 @@ public final class AudioAnalysis {
     guard !isRunning else { return }
     let input = engine.inputNode
     let format = input.inputFormat(forBus: tapBus)
+    // A 0-channel/0 Hz format means no input device; `installTap` with it raises an ObjC
+    // exception (a crash, not a thrown error), so refuse up front.
+    guard format.channelCount > 0, format.sampleRate > 0 else {
+      statusText = "mic: no input device"
+      throw AudioAnalysisError.noInputDevice
+    }
     input.installTap(onBus: tapBus, bufferSize: 1024, format: format) { [weak self] buffer, _ in
       self?.handle(buffer)
     }
     try engine.start()
     isRunning = true
+    statusText = "mic \(Int(format.sampleRate)) Hz ×\(format.channelCount)"
   }
 
   public func stop() {
@@ -231,4 +260,8 @@ public final class AudioAnalysis {
     for i in 0..<frameCount { mono[i] = (mono[i] / channelScale) * gain }
     bands.ingest(mono)
   }
+}
+
+public enum AudioAnalysisError: Error {
+  case noInputDevice
 }

@@ -91,4 +91,18 @@ final class AudioAnalysisTests: XCTestCase {
     let v = r.process(-0.5)
     XCTAssertGreaterThan(v, 0, "rectified"); XCTAssertLessThan(v, 0.5, "slewed by slide 22")
   }
+  func testInputRMSTracksTheLastIngestedBatch() {
+    let bands = AudioBands(sampleRate: 48000)
+    XCTAssertEqual(bands.inputRMS, 0)
+    bands.ingest(sine(440, seconds: 0.5, sampleRate: 48000, amplitude: 0.5))
+    XCTAssertEqual(bands.inputRMS, 0.5 / sqrt(2), accuracy: 0.005, "RMS of a 0.5-amplitude sine")
+    bands.ingest([Float](repeating: 0, count: 1024))
+    XCTAssertEqual(bands.inputRMS, 0)
+  }
+  func testDecibelsFloorAtMinus90() {
+    XCTAssertEqual(AudioBands.decibels(0.01), -40, accuracy: 0.01)
+    XCTAssertEqual(AudioBands.decibels(1), 0, accuracy: 0.01)
+    XCTAssertEqual(AudioBands.decibels(0), -90)
+    XCTAssertEqual(AudioBands.decibels(1e-9), -90)
+  }
 }

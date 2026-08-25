@@ -141,8 +141,10 @@ public final class MetalHostView: NSView {
     let now = CACurrentMediaTime()
     let accumulator = engine.step(at: now, commandBuffer: commandBuffer)
     let drawableSize = SIMD2(Int(metalLayer.drawableSize.width), Int(metalLayer.drawableSize.height))
+    let inputDB = Int(AudioBands.decibels(engine.bands.inputRMS).rounded())
     outputStage.draw(accumulator: accumulator, into: update.drawable, commandBuffer: commandBuffer,
-                     drawableSize: drawableSize)
+                     drawableSize: drawableSize,
+                     statusLine: "\(engine.audioStatus)   in \(inputDB) dB")
     commandBuffer.commit()
     // Frame-scoped pooled leases (the warp pass's output, filter-chain intermediates) are only
     // ever valid for the frame that leased them — `TexturePool.endFrame`'s own doc comment;

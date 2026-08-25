@@ -86,7 +86,13 @@ public final class AppBootstrap {
     // the one place this codebase touches `AVAudioEngine`, and it only ever starts here, when a
     // real entry point runs — never in a test.
     let audioAnalysis = try? AudioAnalysis(bands: engine.bands)
-    try? audioAnalysis?.start()
+    do {
+      try audioAnalysis?.start()
+      engine.audioStatus = audioAnalysis?.statusText ?? "mic: unavailable"
+    } catch {
+      // A missing device or a denied permission must be VISIBLE (HUD), not a silent instrument.
+      engine.audioStatus = "mic FAILED: \(error.localizedDescription)"
+    }
 
     return AppBootstrap(
       engine: engine, keyboardSurface: keyboard, viewModel: viewModel, audioAnalysis: audioAnalysis
