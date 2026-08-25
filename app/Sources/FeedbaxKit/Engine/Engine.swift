@@ -139,8 +139,15 @@ public final class Engine {
   /// init parameter, not hardcoded, so the RGBA16F quality-toggle headroom design §4 calls out
   /// ("RGBA16F as a quality toggle where bandwidth allows") is actually reachable — currently
   /// by `feedbax-dev --soak --accumulator-format rgba16f` (Task 24); no live UI toggle yet.
+  /// `stickerFolder` — nil (every existing call site) reproduces the ORIGINAL CWD-relative
+  /// default exactly, so every test that relies on `swift test`'s ambient working directory (or
+  /// on `changeCurrentDirectoryPath` to a fixture) keeps passing unchanged. A caller that knows
+  /// the CWD-relative default won't resolve to anything real — `AppBootstrap.start()`, finding 1
+  /// of the final review: a Finder-launched `Feedbax.app` bundle's CWD is `/`, which
+  /// `input/transparent-background` can never exist under — passes an explicit URL instead.
   public init(context: MetalContext, audioSampleRate: Float = 48000,
-              accumulatorFormat: MTLPixelFormat = .rgba8Unorm) throws {
+              accumulatorFormat: MTLPixelFormat = .rgba8Unorm,
+              stickerFolder: URL? = nil) throws {
     self.context = context
     let format = accumulatorFormat
     let size = Engine.defaultResolution
@@ -151,14 +158,19 @@ public final class Engine {
     self.bands = AudioBands(sampleRate: audioSampleRate)
     self.waveforms = try WaveformRenderer(context: context, pixelFormat: format)
 
-    // Sticker folder: `input/transparent-background/` resolved against the CURRENT WORKING
-    // DIRECTORY (controller ruling, not the app bundle or source root) — `URL(fileURLWithPath:)`
-    // resolves a relative string against `FileManager.default.currentDirectoryPath` for us.
-    // A missing folder is tolerated: `StickerSource.init` scans and comes up with `itemCount
-    // == 0` rather than throwing (see its own doc comment), which is exactly the "nothing to
-    // show yet" state a fresh checkout with no `input/` folder should render as.
-    let stickerFolder = URL(fileURLWithPath: "input/transparent-background", isDirectory: true)
-    self.sticker = StickerSource(context: context, folder: stickerFolder)
+    // Sticker folder: default is `input/transparent-background/` resolved against the CURRENT
+    // WORKING DIRECTORY (controller ruling, not the app bundle or source root) —
+    // `URL(fileURLWithPath:)` resolves a relative string against
+    // `FileManager.default.currentDirectoryPath` for us. That default only makes sense for a
+    // process whose CWD is a repo checkout (`swift run`, `swift test`); a real caller resolves
+    // the folder itself and passes it in via `stickerFolder` (see that parameter's doc comment
+    // above). A missing folder is tolerated either way: `StickerSource.init` scans and comes up
+    // with `itemCount == 0` rather than throwing (see its own doc comment), which is exactly the
+    // "nothing to show yet" state a fresh checkout/install with no populated folder should
+    // render as.
+    let resolvedStickerFolder = stickerFolder
+      ?? URL(fileURLWithPath: "input/transparent-background", isDirectory: true)
+    self.sticker = StickerSource(context: context, folder: resolvedStickerFolder)
     self.movie = MovieSource(context: context)
 
     // Both registered for the compositor's shared z-order/projection machinery (`drawSeeds`'s
@@ -282,10 +294,17 @@ public final class Engine {
       break   // one-shot UI action — `PreviewView` (fullscreen)
     case .stillCapture:
       // Task 21: write the last completed frame to ~/Pictures/Feedbax/ as a dated PNG.
-      // Synchronous by design: readPixels → waitUntilCompleted → CGImage write. A keypress
-      // capture may hitch ~one frame, acceptable for this one-shot action. Async would race
-      // the ping-pong accumulator reuse (FeedbackCore's double-buffer flips next frame, so an
-      // in-flight async blit could read overwritten data). Failures logged, never crash.
+      // Synchronous by design: readPixels → waitUntilCompleted → CGImage write. The hitch this
+      // causes scales with canvas size, not a flat "~one frame" — `readPixels` materializes the
+      // WHOLE accumulator into host memory and the PNG encode runs on the same thread before
+      // this call returns, so at 1080p it's roughly a frame's worth of stall, but at 8K
+      // (7680×4320, `resolutionPresets`' largest entry) `readPixels` alone moves on the order of
+      // a gigabyte and the encode is proportionally heavier — a visible, multi-second pause, not
+      // a one-frame hitch (final review's recalibration — the original estimate was off by
+      // orders of magnitude at the top of the resolution range). Still deliberately synchronous:
+      // async would race the ping-pong accumulator reuse (FeedbackCore's double-buffer flips
+      // next frame, so an in-flight async blit could read overwritten data) — that rationale
+      // stands regardless of how long the stall actually is. Failures logged, never crash.
       do {
         _ = try StillCapture.write(core.accumulator, context: context, directory: nil,
                                    date: Date())

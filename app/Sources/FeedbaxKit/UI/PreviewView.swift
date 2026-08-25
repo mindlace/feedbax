@@ -127,6 +127,16 @@ public final class MetalHostView: NSView {
 
   private func renderFrame(_ update: CAMetalDisplayLink.Update) {
     guard let outputStage else { return }
+    // Final review, finding 3: `EngineViewModel.setFrameRate` only mutates `engine.frameRate`;
+    // nothing else in this class ever told the already-running `FrameClock`'s display link
+    // about a live preset change (`viewDidMoveToWindow` builds `clock` exactly once, guarded by
+    // `clock == nil`). Polling here — once per tick, the cheapest place to notice the mismatch
+    // without wiring a Combine/KVO observation path just for one Int — is what makes a preset
+    // switch actually retune the running link instead of silently doing nothing until the next
+    // relaunch. `updateRate` itself no-ops when the rate hasn't changed (`FrameClock
+    // .shouldRetune`), so this costs nothing on the (overwhelming majority of) frames where it
+    // hasn't.
+    clock?.updateRate(engine.frameRate)
     let commandBuffer = engine.context.queue.makeCommandBuffer()!
     let now = CACurrentMediaTime()
     let accumulator = engine.step(at: now, commandBuffer: commandBuffer)

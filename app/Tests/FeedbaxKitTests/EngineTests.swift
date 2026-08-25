@@ -105,4 +105,17 @@ final class EngineTests: XCTestCase {
     XCTAssertTrue(e.bumpsEnabled.world, "bump enable restored")
     XCTAssertEqual(e.sticker.selectedIndex, 1, "sticker source selection restored")
   }
+
+  /// Final review, finding 1: `Engine.init`'s new `stickerFolder` parameter is what lets
+  /// `AppBootstrap.start()` point the sticker source at a real, resolvable location instead of
+  /// the CWD-relative default a Finder-launched `Feedbax.app` (CWD `/`) can never see. This pins
+  /// down the plumbing on `Engine`'s side, independent of `AppBootstrap`'s own fallback policy.
+  func testExplicitStickerFolderIsScannedOnInit() throws {
+    let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
+    try Data([0]).write(to: tempFolder.appendingPathComponent("a.png"))
+
+    let e = try Engine(context: try MetalContext(), stickerFolder: tempFolder)
+    XCTAssertEqual(e.sticker.itemCount, 1, "explicit stickerFolder must be scanned, not the CWD-relative default")
+  }
 }
