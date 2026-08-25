@@ -56,13 +56,13 @@ public final class ControlRouter {
     var ramps: [ControlSlot: LinearRamp] = [:]
     var targets: [ControlSlot: Float] = [:]
     for slot in ControlRouter.rampedSlots {
-      // Cold start (spec §01 §4): most ramps seed from whatever raw 0 maps to — the original
-      // never emits a value for these until the first control message unpacks a target
-      // (`mIniCtlSmooth`'s `line` is silent until then), and raw-0 IS that "nothing has
-      // happened yet" state. Hue/saturation/bias are the exception — `coldStartTarget` below
-      // overrides them with the HSL pix's own baked `param` defaults, which is what's
-      // actually on screen during that same window.
-      let target = ControlRouter.coldStartTarget(for: slot)
+      // Cold start (spec §01 §4): the geometry ramps seed from whatever raw 0 maps to — the
+      // original never emits a value for these until the first control message unpacks a
+      // target (`mIniCtlSmooth`'s `line` is silent until then), and raw-0 IS that "nothing
+      // has happened yet" state. The three HSL ramps are the exception — `coldStartSeed`
+      // below seeds them AT their mapped startup-vector values, so the startup vector lands
+      // without any glide at all.
+      let target = ControlRouter.coldStartSeed(for: slot)
         ?? ControlRouter.mappedTarget(for: slot, raw: 0, sInvert: 1)
       ramps[slot] = LinearRamp(initial: target, smoothMs: smoothMs, grainMs: grainMs)
       targets[slot] = target
@@ -78,13 +78,43 @@ public final class ControlRouter {
     mergeAndProcess(write, at: time)
   }
 
-  /// The exact 9 floats webui's `loadbang` packs and broadcasts ~0 ms after patch load (spec
-  /// §04 §1.1), index-for-index against `ControlSlot`'s declaration order (hue, bias,
-  /// scalebright, panX, panY, zoom, theta, nc, saturation). This is the vector every fresh
-  /// session actually starts from — not the all-zero rest state a bare `ControlRouter()`
-  /// otherwise reads as.
+  /// The 9-slot control vector a fresh session actually runs on, index-for-index against
+  /// `ControlSlot`'s declaration order (hue, bias, scalebright, panX, panY, zoom, theta, nc,
+  /// saturation).
+  ///
+  /// **This is a MEASURED value, not a value read off the patch.** Do not "correct" it back
+  /// to the vector in the webui's `loadbang` message (feedbax.webui.maxpat obj-89,
+  /// `0.011905 0.392857 0.755952 -0.354023 -0.5 -0.634044 0.281234 0. 0.71131`). That
+  /// message is real, and it is genuinely the first thing to reach `s shadeCtl` — but
+  /// instrumenting the *running* patch at `s shadeCtl` shows it is superseded 137 ms after
+  /// load and never returns. Two mechanisms do it:
+  ///
+  /// 1. **`r ctrlbang` re-emission at frame rate.** The render clock bangs the webUI `pack`
+  ///    object's hot inlet once per frame (60 Hz). A Max `pack` re-emits its own stored
+  ///    contents on a hot-inlet bang, so from the very first rendered frame the vector on
+  ///    `shadeCtl` is the pack's own state — the widget positions — not the one-shot
+  ///    `loadbang` list. The `loadbang` list only ever wins the handful of milliseconds
+  ///    before the first `ctrlbang`.
+  /// 2. **The `loadbang -> pipe 1500` startup burst.** A delayed button cascade writes
+  ///    hue / brightness / saturation directly at t ≈ 1500 ms, settling the pack (and hence
+  ///    every subsequent frame's vector) on the values below.
+  ///
+  /// The vector below is the steady state after both, captured identically across three
+  /// independent patch launches. Under the corrected classic-mode `maxScale` (see
+  /// `mappedTarget` / `maxScale`) it maps to these per-frame HSL deltas:
+  ///
+  /// - hue        raw  0.1        -> hueShift   **+0.005** / frame (slow forward hue rotation)
+  /// - bias       raw  0.0        -> lightDelta **-0.01**  / frame (**negative** — this is the
+  ///              restoring term, the decay that keeps the feedback loop from integrating to
+  ///              white; a positive lightDelta here is the bug, not the fix)
+  /// - saturation raw  0.5        -> satDelta   **exactly 0.0** / frame (0.5 is the exact
+  ///              midpoint of the 0...1 domain mapping onto -0.05...0.05, so saturation is
+  ///              perfectly neutral — it neither blooms nor bleaches)
+  ///
+  /// Slots not listed are geometry (`panX`/`panY` centred at 0, `zoom` -0.25, `theta`
+  /// 0.26092…) or dead (`scalebright`, `nc`).
   public static let startupVector: [Float] = [
-    0.011905, 0.392857, 0.755952, -0.354023, -0.5, -0.634044, 0.281234, 0.0, 0.71131
+    0.1, 0.0, 0.0, 0.0, 0.0, -0.25, 0.26092064967168305, 0.0, 0.5
   ]
 
   /// Reproduces the original's cold start: the webui's loadbang-fired startup vector lands
@@ -110,7 +140,11 @@ public final class ControlRouter {
         mergeAndProcess(write, at: time)
       }
     }
-    let eraseAlpha = maxScale(eraseControl, 0, 1, 0.8, 1, exp: 3)   // spec §01 §2 — never ramped
+    // Never ramped (spec §01 §2). `scale 0 1 0.8 1 3` in Max's default classic mode is
+    // `0.8 + 0.2·pow(3, x-1)`, and it is discontinuous at 0: exactly 0 gives 0.8, but 1e-6
+    // gives 0.8667. So the knob's floor is 0.8 only at a hard zero — the useful range runs
+    // 0.8667 (just off zero) to 1.0 (full clear), passing 0.9155 at half. See `maxScale`.
+    let eraseAlpha = maxScale(eraseControl, 0, 1, 0.8, 1, exp: 3)
     return RenderParams(
       zoom: ramps[.zoom]!.value(at: time) * sInvert,   // SInvert AFTER the ramp: an instant flip
       theta: ramps[.theta]!.value(at: time),
@@ -152,20 +186,45 @@ public final class ControlRouter {
     }
   }
 
-  /// spec §01 §4: the HSL pix's own three `param` objects declare non-zero defaults —
-  /// `hue_shift 0.02`, `saturation 0.5`, `lightness 0.5` — and those, not zero, are what the
-  /// original renders for however many frames elapse before the first control-vector message
-  /// ever arrives (`mIniCtlSmooth`'s `line` produces no output at all until its first target
-  /// is unpacked, so the `"hue_shift $1"`/etc. messages that would overwrite these never
-  /// fire). Seeding these three ramps here — instead of at mapped raw-0 like every other
-  /// ramped slot — is this port's frame-0 cold start matching that. Non-HSL slots have no
-  /// such baked pix default, so they fall through to `nil` and keep the raw-0 behavior.
-  private static func coldStartTarget(for slot: ControlSlot) -> Float? {
+  /// Seeds the three HSL ramps AT their mapped startup-vector values, so the startup vector
+  /// is already in force on frame 0 and no glide happens at all.
+  ///
+  /// **Do not reintroduce a glide from the gen `param` defaults here.** The HSL pix's three
+  /// `param` objects do declare non-zero defaults — `param hue_shift 0.02`,
+  /// `param saturation 0.5`, `param lightness 0.5` — and an earlier version of this function
+  /// returned those RAW numbers, which then became the *origin* of a 100 ms glide down to
+  /// the (much smaller) mapped startup targets. That is a modeling error twice over:
+  ///
+  /// 1. **Wrong units.** `0.02`/`0.5`/`0.5` are *shader-side* values — they sit where
+  ///    `hueShift`/`satDelta`/`lightDelta` sit, already past the map. Feeding them to a ramp
+  ///    whose other endpoint is a `maxScale` OUTPUT (order ±0.005…0.05) mixes the two sides
+  ///    of the map: `0.5` as a per-frame lightness delta is 50× the largest value the bias
+  ///    map can ever produce.
+  /// 2. **Wrong role.** A `param` default is the shader's *static* value during the sub-frame
+  ///    window before the first `hue_shift $1` message lands — never the starting point of a
+  ///    glide. `r ctrlbang` bangs the webUI `pack`'s hot inlet from frame one (the same
+  ///    mechanism that supersedes the `loadbang` vector — see `startupVector`), so a real
+  ///    launch has a fully-formed control vector on `s shadeCtl` before the first rendered
+  ///    frame. There is no interval over which the patch interpolates from the param default
+  ///    to the control value; the control value is simply what frame 1 already uses.
+  ///
+  /// Measured cost of the old behavior: frames 3-6 were 100% white pixels — a visible white
+  /// flash at every launch — because ~+0.28 lightness/frame and ~+0.30 saturation/frame
+  /// (the glide's early portion) drive the additively-blended feedback plane straight past
+  /// its `[0,1]` clip into `hsl2rgb`'s `l=1` white.
+  ///
+  /// The geometry slots (`panX`/`panY`/`zoom`/`theta`) have no baked pix default and are not
+  /// what flashed, so they fall through to `nil` and keep the raw-0 rest seeding, which is
+  /// the honest "no control message has arrived" state for a bare `ControlRouter()`.
+  ///
+  /// This affects the INITIAL seed only. Every later control change still retargets through
+  /// `updateRampTargets` and glides over `smoothMs` exactly as before.
+  private static func coldStartSeed(for slot: ControlSlot) -> Float? {
     switch slot {
-    case .hue: return 0.02
-    case .saturation: return 0.5
-    case .bias: return 0.5   // feeds lightDelta — see RenderParams.lightDelta
-    default: return nil
+    case .hue, .saturation, .bias:
+      return mappedTarget(for: slot, raw: startupVector[slot.rawValue], sInvert: 1)
+    default:
+      return nil
     }
   }
 
@@ -173,7 +232,21 @@ public final class ControlRouter {
   /// in HERE, before the map — a flip glides in over the ramp. `zoom`'s SInvert multiply is
   /// deliberately absent from this function; `tick` applies it after evaluating the ramp, so
   /// a flip there is instant, not smoothed.
-  private static func mappedTarget(for slot: ControlSlot, raw: Float, sInvert: Float) -> Float {
+  ///
+  /// The `exp:` arguments below are kept verbatim from the patch, but note that in Max's
+  /// default classic mode an exponent <= 1 is IGNORED — so `hue`, `bias` and `saturation`
+  /// are plain straight lines across their output ranges, not the eased curves the argument
+  /// suggests. Hue spans -0.05...0.05 linearly (measured startup raw 0.1 -> +0.005), bias
+  /// spans -0.04...0.02 linearly (raw 0.0 -> -0.01, i.e. the midpoint of -1...1 lands BELOW
+  /// zero because the output range is asymmetric), saturation spans -0.05...0.05 linearly
+  /// over a 0...1 domain (raw 0.5 -> exactly 0). See `maxScale` for why, and
+  /// `startupVector` for where those raw values come from.
+  ///
+  /// Internal rather than `private` so `EngineInvariantTests` can assert the sign of the
+  /// `bias` map at the real `startupVector` value directly — the single cheapest check that
+  /// would have caught the whiteout (a positive `lightDelta` is an integrator that gains
+  /// energy every frame). Not `public`: the map is an implementation detail of the router.
+  static func mappedTarget(for slot: ControlSlot, raw: Float, sInvert: Float) -> Float {
     switch slot {
     case .hue: return maxScale(raw, -1, 1, -0.05, 0.05, exp: 0.1)
     case .bias: return maxScale(raw, -1, 1, -0.04, 0.02, exp: 0.05)

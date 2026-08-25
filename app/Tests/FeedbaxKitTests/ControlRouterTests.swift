@@ -24,7 +24,9 @@ final class ControlRouterTests: XCTestCase {
     let r = ControlRouter()
     r.eraseControl = 0.5
     let p = r.tick(at: 0.001)                             // immediately, no ramp
-    XCTAssertEqual(p.eraseAlpha, 0.825, accuracy: 1e-4)   // 0.8 + 0.2·0.5³
+    // Measured from Max 9.1.5: `scale` defaults to classic mode, so this is
+    // 0.8 + 0.2·pow(3, 0.5 − 1), NOT the modern-mode 0.8 + 0.2·0.5³ this once asserted.
+    XCTAssertEqual(p.eraseAlpha, 0.915470053838, accuracy: 1e-6)
   }
   func testSInvertZoomFlipsInstantlyPanRampsIn() {
     let r = ControlRouter()

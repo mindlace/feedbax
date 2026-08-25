@@ -3,10 +3,14 @@ import simd
 @testable import FeedbaxKit
 
 final class PresetTests: XCTestCase {
-  func testStartupVectorIsTheWebuiLoadbang() {
-    // spec §04 §1.1 — the 9 floats webui broadcasts ~0 ms after load
+  func testStartupVectorIsTheMeasuredSteadyState() {
+    // NOT the webui `loadbang` list (obj-89). That list is superseded 137 ms after load by
+    // `r ctrlbang` re-emitting the webUI pack at frame rate and by the `loadbang -> pipe
+    // 1500` button burst, and never returns. These 9 floats are the measured steady state on
+    // `s shadeCtl` in the running patch, identical across three launches — see
+    // `ControlRouter.startupVector`'s doc comment before "fixing" this back.
     XCTAssertEqual(ControlRouter.startupVector,
-                   [0.011905, 0.392857, 0.755952, -0.354023, -0.5, -0.634044, 0.281234, 0.0, 0.71131])
+                   [0.1, 0.0, 0.0, 0.0, 0.0, -0.25, 0.26092064967168305, 0.0, 0.5])
     let r = ControlRouter()
     r.applyStartupDefaults(at: 0)
     XCTAssertEqual(r.rawSlots, ControlRouter.startupVector)

@@ -24,10 +24,14 @@ extension Bundle {
   }
 }
 
-/// The seven P1 parity scenarios (design §9, this task's brief) — one `Scenario` per look
-/// the port has to keep pixel-stable release over release. Each attaches a short doc comment
-/// citing the fidelity-checklist item(s) (design §6) it exists to pin, same convention as
-/// `WarpParityTests`/`FilterTests`.
+/// The parity scenarios (design §9) — one `Scenario` per look this port renders through a
+/// materially different path (positive-zoom fold, SInvert's point-mirror, a hue-heavy run).
+/// Each attaches a short doc comment citing the fidelity-checklist item(s) (design §6) it
+/// exists to pin, same convention as `WarpParityTests`/`FilterTests`.
+///
+/// Read `GoldenFrameTests`' own header before touching any frame count or slot value here:
+/// these scenarios feed CHANGE DETECTORS, not correctness oracles, and their parameters were
+/// once quietly bent around a real bug.
 enum Scenarios {
   /// design §9: "small canvases (192×108) keep references tiny."
   static let canvasSize = SIMD2<Int>(192, 108)
@@ -44,56 +48,34 @@ enum Scenarios {
   /// convention) and overrides only the slots/toggles it cares about, rather than each
   /// scenario hand-rolling all 9 slots. `layers: []`: no scenario here needs a `PresetLayer`
   /// entry — `sourceSelection`/`filters` restore is a no-op with an empty list, and the
-  /// sticker/movie defaults (`StickerSource`'s auto-selected index 0, `LayerTransform()`'s
-  /// identity placement) are already what every scenario wants.
+  /// sticker defaults (`StickerSource`'s auto-selected index 0, `LayerTransform()`'s identity
+  /// placement) are already what every scenario wants.
   ///
-  /// `bias`/`saturation`, like `zoom`/`theta`/`hue`, default to nil — "leave the startup
-  /// vector's own raw value alone." Long-running scenarios pass `bias: noDriftBias,
-  /// saturation: noDriftSaturation` explicitly (see those constants' own doc) instead: found
-  /// empirically (see `GoldenRunner.render`'s note on the `at: -1` settle-time fix) while
-  /// eyeballing the first correctly-settled references — the startup vector's own bias/
-  /// saturation raw values map to a small but PERSISTENT positive per-frame lightness/
-  /// saturation delta (`ControlRouter.mappedTarget`'s `exp 0.05`/`exp 0.1` curves are heavily
-  /// compressive, so nearly the whole raw domain maps close to the high end of their output
-  /// range) — additive every frame, with nothing that ever pulls it back down, i.e. a
-  /// monotonic integrator. Over the ~20-60 frames a delta this size takes to walk saturation/
-  /// lightness into their `[0,1]` clip, ANY multi-second scenario converges to a stable,
-  /// all-information-destroying WHITE fixed point (`hsl2rgb` at `l=1` is white regardless of
-  /// hue/sat) — real, faithful-to-spec-§01-§4 engine behavior (a performer fights this in the
-  /// original too, and `identityAccumulation`'s own short 10-frame run deliberately keeps the
-  /// true startup-vector value to show it), not a bug — but it drowns out whatever a LONGER
-  /// golden scenario exists to actually demonstrate (the spiral, the kaleidoscope, the hue
-  /// wrap), so those opt out of it explicitly instead.
+  /// **There is no `bias`/`saturation` override parameter, deliberately.** There used to be,
+  /// with two `noDrift*` constants passed by the three long scenarios to null the HSL
+  /// integrator out. Those constants were originally hand-tuned against the OLD, broken
+  /// modern-mode `maxScale`, under which the startup vector's own bias mapped to a persistent
+  /// POSITIVE per-frame lightness delta — a monotonic integrator with nothing pulling it
+  /// back. Every multi-second scenario had to opt out of the real startup vector to stay
+  /// legible, which is precisely how the broken mapping stayed invisible for months. Under
+  /// the corrected classic-mode map the startup vector maps `bias` raw 0.0 to **-0.01**/frame
+  /// (negative — the restoring term) and `saturation` raw 0.5 to **exactly 0**/frame, so
+  /// these scenarios now run on the real cold-start HSL values and a future regression in
+  /// that mapping shows up here instead of being pinned away. If a scenario ever seems to
+  /// need an HSL crutch again, that is a finding about the engine, not a parameter to add
+  /// back.
   static func preset(name: String, zoom: Float? = nil, theta: Float? = nil, hue: Float? = nil,
-                     bias: Float? = nil, saturation: Float? = nil,
                      erase: Float, layerMode: LayerMode = .sticker,
-                     layerEnabled: Bool = false, wave1: Bool = true, wave2: Bool = false,
-                     worldBump: Bool = false, waveBump: Bool = false,
-                     kittyBump: Bool = false) -> Preset {
+                     layerEnabled: Bool = false) -> Preset {
     var slots = ControlRouter.startupVector
     if let zoom { slots[ControlSlot.zoom.rawValue] = zoom }
     if let theta { slots[ControlSlot.theta.rawValue] = theta }
     if let hue { slots[ControlSlot.hue.rawValue] = hue }
-    if let bias { slots[ControlSlot.bias.rawValue] = bias }
-    if let saturation { slots[ControlSlot.saturation.rawValue] = saturation }
-    let toggles = PresetToggles(worldBump: worldBump, waveBump: waveBump, kittyBump: kittyBump,
-                                wave1: wave1, wave2: wave2, layerEnabled: layerEnabled)
+    let toggles = PresetToggles(worldBump: false, waveBump: false, kittyBump: false,
+                                wave1: true, wave2: false, layerEnabled: layerEnabled)
     return Preset(name: name, slots: slots, eraseControl: erase, toggles: toggles, layers: [],
                  layerMode: layerMode.presetIdentifier)
   }
-
-  /// Raw `.bias` (→ `lightDelta`) that maps closest to a true zero per-frame delta —
-  /// `maxScale(raw, -1, 1, -0.04, 0.02, exp: 0.05)` evaluated at `raw = -0.999` gives
-  /// `+0.00103`, the smallest-magnitude value found by scanning the curve near its low end
-  /// (the mapping is so compressive under `exp: 0.05` that `raw = -1` undershoots to a much
-  /// larger `-0.04`, and everything above `-0.99` overshoots well into the positive teens of
-  /// a percent — see `GoldenRunner`'s note on why near-zero, not "whatever the startup
-  /// vector says," is what a long-running scenario needs here).
-  static let noDriftBias: Float = -0.999
-  /// Raw `.saturation` (→ `satDelta`, domain `0...1` unlike its `-1...1` siblings) that maps
-  /// closest to zero — `maxScale(raw, 0, 1, -0.05, 0.05, exp: 0.1)` at `raw = 0.001` gives
-  /// `+0.00012`, same reasoning as `noDriftBias`.
-  static let noDriftSaturation: Float = 0.001
 
   /// `MovieSource` plays on `AVPlayer`'s own real (host) clock (design §5's load-bearing
   /// rule) — nothing pumps a display-link run loop in this headless harness, so without
@@ -142,150 +124,149 @@ enum Scenarios {
     }
   }
 
-  /// 1. Startup defaults, nothing else touched — proves the cold-start recipe (erase's 1.0
-  /// hard clear, no seed layer, wave 1 only) doesn't crash and settles to a stable image.
-  /// 10 frames: past the ~100 ms/6-frame ramp-settle window (`LinearRamp`'s own `smoothMs`),
-  /// so the captured frame reflects the SETTLED startup vector, not an in-flight glide — and
-  /// deliberately short enough that the startup vector's own (undisturbed — `bias`/
-  /// `saturation` are left at nil here, unlike the multi-second scenarios below) small
-  /// per-frame HSL drift (see `preset`'s own doc) hasn't yet washed the frame to white.
-  static var identityAccumulation: Scenario {
-    Scenario(name: "identity-accumulation", preset: preset(name: "identity-accumulation", erase: 1.0),
-            frames: 10, size: canvasSize)
-  }
-
-  /// 2. Sticker layer on the committed 32×32 glyph fixture (loaded via `GoldenFrameTests`'
+  /// 1. Sticker layer on the committed 32×32 glyph fixture (loaded via `GoldenFrameTests`'
   /// CWD setup, see its `setUpWithError`), zoom 0.9 / theta 0.2 / erase 0.55 raw, 120 frames
   /// — long enough for the fold-warp's repeated application to build the signature spiral
-  /// (design §9's "golden-frame tests" example scenario). `bias`/`saturation` pinned to
-  /// `noDriftBias`/`noDriftSaturation` (see `preset`'s own doc) — 120 frames is well past the
-  /// point the startup vector's own HSL drift would otherwise wash this out to solid white.
+  /// (design §9's "golden-frame tests" example scenario). HSL runs on the real startup
+  /// vector's values (see `preset`'s own doc for why there is no longer a no-drift pin).
   static var rotaSpiral: Scenario {
     Scenario(name: "rota-spiral",
-            preset: preset(name: "rota-spiral", zoom: 0.9, theta: 0.2,
-                          bias: noDriftBias, saturation: noDriftSaturation, erase: 0.55,
+            preset: preset(name: "rota-spiral", zoom: 0.9, theta: 0.2, erase: 0.55,
                           layerMode: .sticker, layerEnabled: true),
             frames: 120, size: canvasSize)
   }
 
-  /// 3. Identical to `rotaSpiral` up to frame 60, where the control timeline flips SInvert —
+  /// 2. Identical to `rotaSpiral` up to frame 60, where the control timeline flips SInvert —
   /// checklist #7: "negates zoom + offsets → point-mirror kaleidoscope; first-class toggle."
-  /// Only 4 further frames (64 total, not 120): traced empirically (`DiagTests` scratch
-  /// harness, since removed) frame by frame after the flip — negating zoom, unlike the
-  /// positive-zoom fold `rotaSpiral` settles into a static self-referential fixed point
-  /// under, does NOT converge; it keeps sampling genuinely new canvas regions each frame, and
-  /// the additive `(srcα,dstα)` feedback-plane blend (checklist #3) compounds that into the
-  /// same white fixed point `preset`'s doc describes, this time in under 10 frames instead of
-  /// 20-60. Frame 64 is well inside the "clearly mirrored, not yet blown out" window (frame
-  /// 69 was already solid white in that trace) — capturing sooner rather than fighting the
-  /// instability with more `noDrift`-style tuning, since the point of this scenario is
-  /// SInvert's mirror, not a long kaleidoscope performance.
+  /// 120 frames, i.e. the same length as `rotaSpiral`, so the pair differ ONLY in the toggle:
+  /// 60 frames of shared spiral build-up, then 60 frames of mirrored evolution.
+  ///
+  /// This scenario was once cut to 64 frames, on the reasoning that negated zoom "does not
+  /// converge" and that frame 69 was already solid white. That whiteout was the broken
+  /// `maxScale` mapping, not a property of SInvert — shortening the run hid the bug rather
+  /// than reporting it. The length here is chosen for what the scenario needs to show; if it
+  /// ever seems to need shortening again, investigate the engine first.
   static var sinvertKaleidoscope: Scenario {
     Scenario(name: "sinvert-kaleidoscope",
-            preset: preset(name: "sinvert-kaleidoscope", zoom: 0.9, theta: 0.2,
-                          bias: noDriftBias, saturation: noDriftSaturation, erase: 0.55,
+            preset: preset(name: "sinvert-kaleidoscope", zoom: 0.9, theta: 0.2, erase: 0.55,
                           layerMode: .sticker, layerEnabled: true),
             timeline: [(frame: 60, write: ControlWrite(toggles: [.sInvert(true)]))],
-            frames: 64, size: canvasSize)
+            frames: 120, size: canvasSize)
   }
 
-  /// 4. Hue slot pinned at 1.0 raw (the mapped ramp's extreme) for 180 frames against the
+  /// 3. Hue slot pinned at 1.0 raw (the mapped ramp's extreme) for 180 frames against the
   /// same glyph/zoom/theta/erase setup as `rotaSpiral` — checklist #5: "HSL shift is
   /// additive in HSL space; hue wraps." A colorless (no seed layer) run would never visibly
   /// demonstrate a hue WRAP — a fully desaturated pixel renders the same regardless of its
   /// hue channel — so this scenario needs real chroma feeding the warp loop.
   ///
-  /// `zoom`/`theta` are `rotaSpiral`'s own values, not left at the startup vector's default
-  /// (traced empirically, `DiagTests` scratch harness since removed): the startup vector's
-  /// own zoom does NOT settle the fold into a static spatial pattern the way `rotaSpiral`'s
-  /// does, so pixels keep sampling genuinely different canvas regions every frame — same
-  /// "additive blend never lets go" mechanism as `sinvertKaleidoscope`'s note, saturating to
-  /// solid white by frame ~10 of 180. Under `rotaSpiral`'s zoom/theta the fold DOES settle to
-  /// a static fractal-like pattern (each pixel's color stabilizes; the traced center pixel
-  /// was already fixed by frame 10 and identical through frame 179) — a single final-frame
-  /// PNG can't show hue CYCLING over time regardless (that needs the unit-level math tests,
-  /// `HSLTests`, for the wrap arithmetic itself), but this at least gives a stable,
-  /// non-degenerate, hue-heavy reference instead of a content-free white square. `bias`/
-  /// `saturation` stay pinned to `noDriftBias`/`noDriftSaturation` for the same reason as
-  /// `rotaSpiral` — 180 frames is otherwise ample time to wash out regardless of zoom.
+  /// `zoom`/`theta` are `rotaSpiral`'s own values rather than the startup vector's: under
+  /// `rotaSpiral`'s fold the pattern settles spatially, so what this reference shows is the
+  /// hue endpoint's effect on a settled geometry rather than on a geometry still churning. A
+  /// single final-frame PNG can't show hue CYCLING over time regardless — that is `HSLTests`'
+  /// job for the wrap arithmetic and the invariant tests' job for the loop's behaviour over
+  /// time; this pins the look at one hue extreme.
   static var hslDrift: Scenario {
     Scenario(name: "hsl-drift",
-            preset: preset(name: "hsl-drift", zoom: 0.9, theta: 0.2, hue: 1.0,
-                          bias: noDriftBias, saturation: noDriftSaturation, erase: 0.55,
+            preset: preset(name: "hsl-drift", zoom: 0.9, theta: 0.2, hue: 1.0, erase: 0.55,
                           layerMode: .sticker, layerEnabled: true),
             frames: 180, size: canvasSize)
   }
-
-  /// 5. Movie layer on the committed `sweep.mov` fixture, `BrcosaFilter` pinned on at its
-  /// hot (camera-chain) defaults — design §10: "the brcosa/keyer filter IMPLEMENTATIONS land
-  /// in P1, pinned by... golden-frame scenarios that attach them to a movie layer" (no P1
-  /// parity default runs them live; this is that pin, ahead of the camera existing). 1 frame
-  /// — see `primeMovie`'s note on why a movie scenario stays this short.
-  static var brcosaOnMovie: Scenario {
-    Scenario(name: "brcosa-on-movie",
-            preset: preset(name: "brcosa-on-movie", erase: 0.55, layerMode: .movie, layerEnabled: true),
-            frames: 1, size: canvasSize,
-            configure: { engine in
-              engine.loadMovie(url: Scenarios.sweepURL)
-              primeMovie(engine)
-              let brcosa = try! BrcosaFilter(context: engine.context)
-              brcosa.enabled = true   // hot defaults 1.55/1.55/1.5 (spec §02 §7.2)
-              engine.movieFilters = FilterChain([brcosa])
-            })
-  }
-
-  /// 6. Same movie fixture, `LumaKeyFilter`'s two-pass midtone cascade pinned on instead —
-  /// checklist #12: "luma = two-pass midtone cascade" — same design §10 rationale as
-  /// `brcosaOnMovie`.
-  static var keyersOnMovie: Scenario {
-    Scenario(name: "keyers-on-movie",
-            preset: preset(name: "keyers-on-movie", erase: 0.55, layerMode: .movie, layerEnabled: true),
-            frames: 1, size: canvasSize,
-            configure: { engine in
-              engine.loadMovie(url: Scenarios.sweepURL)
-              primeMovie(engine)
-              let luma = try! LumaKeyFilter(context: engine.context)
-              luma.enabled = true
-              engine.movieFilters = FilterChain([luma])
-            })
-  }
-
-  /// 7. Waveforms 1 and 2 both enabled, all three bump gates on, `AudioBands` fed a single
-  /// fixed 46.7 + 144.3 Hz mixture (wave 1's and worldBump's own band centers, spec §03 §3 —
-  /// wave 2's 60 Hz band is deliberately NOT part of the mixture) — checklists #10/#11.
-  ///
-  /// Exactly 1 frame, deliberately: `AudioBands.frameValues()`'s `waveBumpRaw`/`kittyBumpRaw`
-  /// are "mean SINCE THE LAST CALL" accumulators that drain to zero the instant they're read
-  /// (`Audio/AudioAnalysis.swift`'s own doc comment), and `Engine.step`'s kitty offset is
-  /// explicitly non-persistent (its stage-3 comment: "must not still be sitting on
-  /// `sticker.transform` once `step` has returned"). A single up-front `ingest` therefore
-  /// only shows a live wave-bump/kitty-bump effect on the very FIRST `step` after it —
-  /// `worldBump` has no such reset (`worldBumpSnapshot` persists indefinitely), so it alone
-  /// would stay visible for any frame count, but capturing frame 0 is what keeps ALL THREE
-  /// gates ("bumps on", checklist #10) live in the one frame this scenario grades.
-  static var waveformsSynthetic: Scenario {
-    Scenario(name: "waveforms-synthetic",
-            preset: preset(name: "waveforms-synthetic", erase: 1.0, wave1: true, wave2: true,
-                          worldBump: true, waveBump: true, kittyBump: true),
-            frames: 1, size: canvasSize,
-            configure: { engine in
-              let mix = zip(sine(46.7, seconds: 1.0, sampleRate: 48000, amplitude: 0.6),
-                            sine(144.3, seconds: 1.0, sampleRate: 48000, amplitude: 0.6)).map(+)
-              engine.bands.ingest(mix)
-            })
-  }
 }
 
-/// Task 22: renders each of `Scenarios`' seven looks headlessly and compares against a
-/// committed reference PNG (design §9's "golden-frame tests" — catches "the look drifted"
-/// without eyeballs). `FEEDBAX_REGEN_GOLDEN=1` regenerates references into the SOURCE TREE
-/// instead of comparing (see the `Bundle.url(forResource:withExtension:fallbackToSourceTree:)`
-/// helper above) — the one manual gate in this file is eyeballing those PNGs before
-/// committing them, per the brief.
+/// # These are CHANGE DETECTORS, not correctness oracles.
+///
+/// Every reference PNG in `GoldenReferences/` was blessed from THIS PORT'S OWN OUTPUT. None
+/// of them was rendered by the original Max/Jitter patch, measured against it, or verified
+/// against anything outside this repository. A green run here means exactly one thing: *the
+/// image this port produces today is the image it produced when the reference was written.*
+/// It does not mean the image is right.
+///
+/// So when a scenario goes red, the correct response is **look at the image and decide** —
+/// open the rendered frame next to the reference and ask whether the change is the one you
+/// intended. It is never "regenerate until green." Regeneration (`FEEDBAX_REGEN_GOLDEN=1`,
+/// which writes into the SOURCE TREE via the
+/// `Bundle.url(forResource:withExtension:fallbackToSourceTree:)` helper above) is the last
+/// step of a deliberate decision, not a way to make a failure go away.
+///
+/// ## Why this warning exists
+///
+/// The previous generation of these references froze a real bug in place for months. The
+/// port's `maxScale` was evaluating Max's `scale` in *modern* mode where the patch uses the
+/// default *classic* mode, which flipped the sign of the startup vector's per-frame lightness
+/// delta: instead of the restoring **-0.01**/frame the real mapping produces, the loop
+/// integrated a persistent POSITIVE delta and washed every long run to solid white. The
+/// golden suite never reported it. Instead the suite was progressively re-parameterized
+/// AROUND it — its own comments recorded the retreat, step by step:
+///
+///   - `identity-accumulation` was held to 10 frames, "deliberately short enough that the
+///     startup vector's own drift hasn't yet washed the frame to white";
+///   - `sinvert-kaleidoscope` was cut from 120 frames to 64 because "frame 69 was already
+///     solid white";
+///   - `hsl-drift` borrowed another scenario's geometry because the startup zoom was
+///     "saturating to solid white by frame ~10";
+///   - three scenarios pinned `bias`/`saturation` to hand-tuned `noDrift*` constants that
+///     nulled the HSL integrator entirely.
+///
+/// Each of those edits was locally reasonable and made the suite green. Collectively they
+/// turned a loud, reproducible engine defect into a set of test parameters, and every
+/// subsequent regeneration re-blessed the broken output as the standard. That is the specific
+/// failure mode this header exists to prevent: a snapshot suite will happily encode any bug
+/// you regenerate it against, and will then defend that bug against every future fix.
+///
+/// **A scenario that has to be shortened, pinned, or re-parameterized to stay legible is
+/// reporting a finding about the engine. Chase the finding; do not tune the scenario.**
+///
+/// ## Where correctness actually lives
+///
+///   - `EngineInvariantTests` — the behavioural invariants of the feedback loop (drift sign,
+///     boundedness, clipping, convergence) asserted as numbers, on the real startup vector,
+///     with no image in the loop.
+///   - `WarpParityTests`, `MaxScaleTests`, `HSLTests`, `RotaFoldTests`, `BrcosaTests`,
+///     `KeyerTests`, `FilterTests`, `WaveformTests`, `AudioAnalysisTests` — the differential
+///     parity tests, which check this port's math against the mapping the patch actually
+///     implements.
+///   - `EngineWiringTests` — the boolean wiring facts (which filter chain runs on which
+///     layer, which gates modulate the frame) that used to be inferred from 1-frame PNGs.
+///
+/// These scenarios add one thing on top of that: an unplanned-visual-change alarm across the
+/// whole pipeline at once. That is genuinely useful, and it is all this is.
+///
+/// ## BLOCKED — there are currently NO committed references, on purpose
+///
+/// `GoldenReferences/` is empty and this test therefore fails, deliberately. When the three
+/// scenarios below were re-expressed on the real startup vector (dropping the `noDrift*`
+/// pins) and regenerated, all three came out **solid white**: 192×108 of pure #FFFFFFFF,
+/// meanLum 1.0000, variance 0.000000, one unique RGBA value in the whole image. That is not a
+/// reference; that is the bug reappearing, and the rule above ("look at the image and decide")
+/// says do not bless it.
+///
+/// The saturation is NOT the HSL mapping this port fixed. Measured frame by frame on the
+/// `rota-spiral` configuration (192×108, sticker layer on, erase raw 0.55, zoom 0.9,
+/// theta 0.2), the whole canvas reaches meanLum ≈ 1.0 with 100% of pixels clipped white by
+/// **frame 10**, and it does so under every HSL setting tried:
+///
+///   - real startup HSL (`bias` raw 0 → lightDelta −0.01/frame): 100% white by frame 10
+///   - the retired no-drift pins (lightDelta exactly 0): 100% white by frame 9
+///   - hue raw 0 (hueShift ≈ 0): 100% white by frame 10
+///   - `bias` raw −1, i.e. the MAXIMUM restoring lightness the map can produce
+///     (−0.04/frame): still meanLum 0.9996 with 80.8% of pixels clipped, from frame 10 on
+///
+/// and under every geometry/erase variation tried (erase raw 1.0 full-clear: meanLum 0.9916;
+/// the startup vector's own minifying zoom: 0.9874; pan raw 0.2/0.2 carrying content
+/// off-screen: 0.9575). `DriftMeasurement` shows the same thing for the plain cold start with
+/// no seed layer at all: 100% clipped white by frame 300. In other words the feedback
+/// composite gains far more brightness per frame than any per-frame lightness decay the
+/// control map can remove — a defect in the loop's gain (the additive `(srcα,dstα)`
+/// past-plane composite and its interaction with the erase base's alpha), not in the control
+/// mapping.
+///
+/// Until that is fixed there is nothing here worth pinning: a reference of a white square
+/// detects no change that matters, and committing one would re-enact exactly the history
+/// described above. Regenerate — and re-read this section — once the loop stays bounded.
 final class GoldenFrameTests: XCTestCase {
   static let scenarios: [Scenario] = [
-    Scenarios.identityAccumulation, Scenarios.rotaSpiral, Scenarios.sinvertKaleidoscope,
-    Scenarios.hslDrift, Scenarios.brcosaOnMovie, Scenarios.keyersOnMovie, Scenarios.waveformsSynthetic,
+    Scenarios.rotaSpiral, Scenarios.sinvertKaleidoscope, Scenarios.hslDrift,
   ]
 
   private var originalCwd: String!
@@ -314,6 +295,22 @@ final class GoldenFrameTests: XCTestCase {
     try? FileManager.default.removeItem(at: tempRoot)
   }
 
+  /// Mean luminance / variance / clipped-white fraction of a rendered frame — the same
+  /// three numbers the "did I just bless a solid colour?" check needs, computed in-process so
+  /// a missing or degenerate reference reports itself instead of waiting for someone to open
+  /// an image viewer.
+  static func statistics(_ pixels: [SIMD4<Float>]) -> (mean: Double, variance: Double, white: Double) {
+    var sum = 0.0, sumSq = 0.0, white = 0
+    for p in pixels {
+      let l = Double(0.2126 * p.x + 0.7152 * p.y + 0.0722 * p.z)
+      sum += l; sumSq += l * l
+      if p.x >= 0.99 && p.y >= 0.99 && p.z >= 0.99 { white += 1 }
+    }
+    let n = Double(pixels.count)
+    let mean = sum / n
+    return (mean, sumSq / n - mean * mean, Double(white) / n)
+  }
+
   func testAllScenariosMatchReferences() throws {
     let ctx = try MetalContext()
     let regen = ProcessInfo.processInfo.environment["FEEDBAX_REGEN_GOLDEN"] == "1"
@@ -324,7 +321,26 @@ final class GoldenFrameTests: XCTestCase {
                                                 withExtension: "png",
                                                 fallbackToSourceTree: true))   // helper: writes go to the source tree
       if regen {
+        let stats = Self.statistics(result)
+        // A blessed reference is a decision, and a degenerate frame is never the right one.
+        // Refusing to WRITE it (rather than trusting a human to notice afterwards) is what
+        // stops the historical failure mode this file's header describes: a whiteout being
+        // quietly re-blessed as the new standard.
+        if stats.variance < 1e-6 {
+          failures.append(String(format: "%@: REFUSED to write reference — frame is a flat "
+                                 + "featureless field (meanLum %.4f, variance %.8f, clipped-white "
+                                 + "fraction %.4f). Fix the engine, not the reference.",
+                                 scenario.name, stats.mean, stats.variance, stats.white))
+          continue
+        }
         try GoldenRunner.writeReference(result, size: scenario.size, to: ref)
+      } else if !FileManager.default.fileExists(atPath: ref.path) {
+        let stats = Self.statistics(result)
+        failures.append(String(format: "%@: NO REFERENCE COMMITTED — deliberately absent, see this "
+                               + "file's header. This scenario currently renders as meanLum %.4f, "
+                               + "variance %.8f, clipped-white fraction %.4f; blessing is blocked "
+                               + "until the feedback loop stops saturating.",
+                               scenario.name, stats.mean, stats.variance, stats.white))
       } else {
         let verdict = try GoldenRunner.compare(result, referencePNG: ref)
         if !verdict.passed {
@@ -332,7 +348,11 @@ final class GoldenFrameTests: XCTestCase {
         }
       }
     }
-    if regen { XCTFail("references regenerated — eyeball the PNGs, then rerun without the flag") }
-    XCTAssertEqual(failures, [], "the look drifted")
+    if regen {
+      XCTFail("references regenerated — OPEN the PNGs, decide whether the new look is the one "
+              + "you intended (a solid/flat field is never it), then rerun without the flag")
+    }
+    XCTAssertEqual(failures, [], "the look changed — look at the images and decide whether the "
+                   + "change is intended; do not regenerate to make this green")
   }
 }

@@ -2,10 +2,16 @@ import XCTest
 @testable import FeedbaxKit
 
 final class RotaFoldTests: XCTestCase {
-  // maxScale: erase example from spec §01 §2 — scale 0 1. 0.8 1. 3. → 0.8 + 0.2·t³
+  /// The patch's erase mapping, `scale 0 1. 0.8 1. 3.` (`Feedbax.maxpat` obj-84). These
+  /// expectations were MEASURED from a live Max 9.1.5 object, not derived: `scale` defaults to
+  /// `classic 1`, whose curve is `outLow + span·pow(exp, x − inHigh)` on the RAW input, not the
+  /// `0.8 + 0.2·t³` power curve this test used to assert (that is `@classic 0`, the mode this
+  /// patch does not use — see `maxScale`'s doc comment). The practical difference is large and
+  /// in the opposite direction from what spec §01 §2 claims: the real curve is biased HIGH,
+  /// already at 0.9155 by half travel rather than sitting near 0.8 for most of it.
   func testMaxScaleEraseCurve() {
-    XCTAssertEqual(maxScale(0.5, 0, 1, 0.8, 1.0, exp: 3), 0.825, accuracy: 1e-4)
-    XCTAssertEqual(maxScale(0.9, 0, 1, 0.8, 1.0, exp: 3), 0.9458, accuracy: 1e-3)
+    XCTAssertEqual(maxScale(0.5, 0, 1, 0.8, 1.0, exp: 3), 0.915470053838, accuracy: 1e-6)
+    XCTAssertEqual(maxScale(0.9, 0, 1, 0.8, 1.0, exp: 3), 0.979191691968, accuracy: 1e-6)
     XCTAssertEqual(maxScale(1.0, 0, 1, 0.8, 1.0, exp: 3), 1.0, accuracy: 1e-6)
   }
   func testMaxScaleLinearAndReversed() {

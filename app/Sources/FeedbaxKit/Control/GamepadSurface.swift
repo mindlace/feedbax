@@ -60,13 +60,15 @@ private struct LiveGamepadState: GamepadState {
 ///   menu → fullscreen (a one-shot UI action, no flip state — same as `KeyboardTrackpadSurface`
 ///   treats `.fullscreen`)
 ///
-/// Sticks get a 0.08 deadzone (Task 14: "GC framework applies none" on its own) — analog noise
-/// near rest must not leak into `panX`/`panY`/`hue`/`bias`. Buttons and the d-pad are
-/// edge-detected against the previous poll's snapshot: a held button/direction must not
-/// re-fire every frame, unlike the continuous stick/trigger axes, which assert every frame
-/// they're outside the deadzone/nonzero (there's no "gesture" to accumulate here — the pad's
-/// own physical position already IS the state, same principle as `KeyboardTrackpadSurface`'s
-/// held accumulators, just read directly instead of nudged).
+/// Sticks and triggers get a 0.08 deadzone (Task 14: "GC framework applies none" on its own) —
+/// analog noise near rest must not leak into `panX`/`panY`/`hue`/`bias`/`zoom`/`theta`. All six
+/// continuous axes are message-on-change (see `lastAsserted`): a pad held rock-steady, inside or
+/// outside its deadzone, asserts nothing on a given poll, so it cannot silently overwrite
+/// another surface's write. Buttons and the d-pad are separately edge-detected against the
+/// previous poll's snapshot: a held button/direction must not re-fire while held, same
+/// discipline, different mechanism (there's no "gesture" to accumulate here — the pad's own
+/// physical position already IS the state, same principle as `KeyboardTrackpadSurface`'s held
+/// accumulators, just read directly instead of nudged).
 public final class GamepadSurface: ControlSurface {
   public let id = "gamepad"
 
@@ -74,16 +76,24 @@ public final class GamepadSurface: ControlSurface {
   public var stateProvider: (() -> GamepadState?)?
 
   private static let stickDeadzone: Float = 0.08
+  /// Triggers share the sticks' deadzone magnitude rather than getting a bespoke constant: both
+  /// are the same class of analog input (spring-loaded, GC framework applies no deadzone of its
+  /// own), and there's no evidence a trigger's rest noise differs enough from a stick's to
+  /// justify a second tuning knob. The bug this fixes: the original code asserted `.zoom`/
+  /// `.theta` on a literal `!= 0` test, so a trigger resting at any tiny nonzero value (spring
+  /// slop, sensor noise) pinned those slots forever and could clobber another surface's write.
+  private static let triggerDeadzone: Float = stickDeadzone
   private static let eraseStepMagnitude: Float = 0.05
   private static let saturationStepMagnitude: Float = 0.1
   /// GC d-pad axes report as effectively digital (−1/0/1 floats); this just needs to sit
   /// strictly between "released" (0) and "pressed" (±1).
   private static let dpadPressThreshold: Float = 0.5
 
-  /// Saturation's own held accumulator, 0...1. Seeded at 0.5 to match `ControlRouter
-  /// .coldStartTarget`'s `.saturation` case — the HSL pix's own baked default — so a
-  /// performer's first d-pad tap steps from the same place the engine is already rendering,
-  /// not from an arbitrary unrelated rest value.
+  /// Saturation's own held accumulator, 0...1 — a RAW slot value, pre-map. Seeded at 0.5 to
+  /// match `ControlRouter.startupVector`'s `.saturation` entry (the measured steady-state
+  /// raw value, which happens to be the exact midpoint of the 0...1 domain and so maps to a
+  /// per-frame `satDelta` of exactly 0) — so a performer's first d-pad tap steps from the
+  /// same place the engine is already rendering, not from an arbitrary unrelated rest value.
   private var saturation: Float = 0.5
 
   /// Previous poll's edge-detection snapshot — buttons and d-pad must not re-fire while held.
@@ -99,6 +109,21 @@ public final class GamepadSurface: ControlSurface {
   /// for asserting its own "back to rest" transition, the same discipline the buttons/d-pad
   /// above already follow via `previousButtons`/`previousDpad`.
   private var previousStickOutsideDeadzone: [ControlSlot: Bool] = [:]
+
+  /// Same edge-tracking as `previousStickOutsideDeadzone`, but for the two triggers: whether
+  /// `.zoom`/`.theta`'s trigger was ABOVE `triggerDeadzone` on the previous poll, so a released
+  /// trigger asserts its remapped rest value (`0 * 2 - 1 == -1`) exactly once instead of never
+  /// resetting.
+  private var previousTriggerAboveDeadzone: [ControlSlot: Bool] = [:]
+
+  /// Message-on-change memory (mirrors `KeyboardTrackpadSurface.lastAsserted`): the value most
+  /// recently sent out for each continuous slot (`.panX`/`.panY`/`.hue`/`.bias`/`.zoom`/
+  /// `.theta`). `poll` only puts a slot in this frame's `ControlWrite` when the freshly computed
+  /// value differs from what's recorded here — this is THE fix for the clobbering bug: a
+  /// gamepad held steady (inside or outside its deadzone) must assert nothing so it cannot
+  /// silently overwrite another surface's write (e.g. an operator dragging a slider) on the next
+  /// poll.
+  private var lastAsserted: [ControlSlot: Float] = [:]
 
   /// The live truth this surface's buttons compute their next flip FROM, instead of keeping
   /// their own memory (finding 4, final review — see `ControlStateSnapshot`'s own doc comment).
@@ -134,8 +159,8 @@ public final class GamepadSurface: ControlSurface {
     var slots: [ControlSlot: Float] = [:]
     assertStick(pad.leftStick, x: .panX, y: .panY, into: &slots)
     assertStick(pad.rightStick, x: .hue, y: .bias, into: &slots)
-    if pad.rightTrigger != 0 { slots[.zoom] = pad.rightTrigger * 2 - 1 }
-    if pad.leftTrigger != 0 { slots[.theta] = pad.leftTrigger * 2 - 1 }
+    assertTrigger(pad.rightTrigger, slot: .zoom, into: &slots)
+    assertTrigger(pad.leftTrigger, slot: .theta, into: &slots)
 
     let eraseStep = eraseStepFrom(pad.dpad)
     stepSaturationFrom(pad.dpad, into: &slots)
@@ -213,17 +238,45 @@ public final class GamepadSurface: ControlSurface {
   /// inside must assert exactly 0.0 once — the outside→inside edge, tracked per-stick in
   /// `previousStickOutsideDeadzone` — or `ControlRouter.rawSlots` stays pinned at the last
   /// outside-deadzone value forever, since nothing else ever tells it to go back to rest.
+  ///
+  /// Message-on-change is layered on top via `assertIfChanged`: even while outside the
+  /// deadzone, a stick held rock-steady at the same reading must not re-assert every poll (that
+  /// was the clobbering bug) — only an actual change in the computed target (a move, or the
+  /// release-to-zero edge above) reaches `slots`.
   private func assertStick(_ v: SIMD2<Float>, x: ControlSlot, y: ControlSlot,
                             into slots: inout [ControlSlot: Float]) {
     let outside = simd_length(v) >= Self.stickDeadzone
-    defer { previousStickOutsideDeadzone[x] = outside }
-    if outside {
-      slots[x] = v.x
-      slots[y] = v.y
-    } else if previousStickOutsideDeadzone[x] == true {
-      slots[x] = 0
-      slots[y] = 0
-    }
+    let wasOutside = previousStickOutsideDeadzone[x] == true
+    previousStickOutsideDeadzone[x] = outside
+    let targetX: Float? = outside ? v.x : (wasOutside ? 0 : nil)
+    let targetY: Float? = outside ? v.y : (wasOutside ? 0 : nil)
+    assertIfChanged(targetX, slot: x, into: &slots)
+    assertIfChanged(targetY, slot: y, into: &slots)
+  }
+
+  /// Same shape as `assertStick`, for a single trigger axis: below `triggerDeadzone` the
+  /// trigger reads as "at rest" and, on the release edge, asserts the remapped rest value
+  /// (`0 * 2 - 1 == -1`) exactly once via `previousTriggerAboveDeadzone`; above it, the raw
+  /// value remaps 0...1 → −1...1 as before. `assertIfChanged` then collapses this to
+  /// message-on-change, same as the sticks.
+  private func assertTrigger(_ raw: Float, slot: ControlSlot, into slots: inout [ControlSlot: Float]) {
+    let above = raw >= Self.triggerDeadzone
+    let wasAbove = previousTriggerAboveDeadzone[slot] == true
+    previousTriggerAboveDeadzone[slot] = above
+    let target: Float? = above ? (raw * 2 - 1) : (wasAbove ? -1 : nil)
+    assertIfChanged(target, slot: slot, into: &slots)
+  }
+
+  /// Message-on-change primitive shared by `assertStick`/`assertTrigger` (mirrors
+  /// `KeyboardTrackpadSurface.poll`'s `lastAsserted` diff): a `nil` target means "nothing to say
+  /// this poll"; a non-nil target only reaches `slots` — and updates `lastAsserted` — if it
+  /// differs from what was last actually sent for that slot. A gamepad that is not moving must
+  /// produce no writes at all, so it cannot clobber another surface's write on the next poll.
+  private func assertIfChanged(_ target: Float?, slot: ControlSlot, into slots: inout [ControlSlot: Float]) {
+    guard let target else { return }
+    guard lastAsserted[slot] != target else { return }
+    slots[slot] = target
+    lastAsserted[slot] = target
   }
 
   private static func liveState() -> GamepadState? {

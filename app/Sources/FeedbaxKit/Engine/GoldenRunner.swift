@@ -84,23 +84,26 @@ public struct GoldenRunner {
   /// the final frame's pixels straight from `MetalContext.readPixels` — straight alpha, no
   /// premultiplication, the same convention `writeReference`/`compare` use.
   ///
-  /// **The preset is applied a full second BEFORE frame 0's clock (`at: -1`, not `at: 0`) —
-  /// load-bearing, found empirically while eyeballing the first generated references.**
-  /// `ControlRouter`'s 7 ramped slots (`LinearRamp`, ~100 ms `smoothMs`) start every fresh
-  /// `Engine` seeded at `coldStartTarget`'s LARGE pix defaults (hue 0.02, sat/light 0.5 —
-  /// checklist #9) and glide toward the preset's (much smaller, ~0.02-0.05) MAPPED targets.
-  /// Applying the preset AT frame 0's own timestamp means `LinearRamp.value(at:)` (its
-  /// `elapsedMs <= 0` branch) hands back that huge pre-glide value on the very frame being
-  /// captured — and because the feedback-plane's `(srcα,dstα)` blend is additive rather than
-  /// interpolating once both alphas sit near 1 (checklist #3), applying an HSL delta that
-  /// large every frame for even 2-3 frames blows saturation/lightness straight past their
-  /// [0,1] clip into a STABLE WHITE fixed point (`hsl2rgb` at `l=1` is white regardless of
-  /// hue/sat) — which is exactly what every non-movie scenario's first reference render did,
-  /// byte-for-byte identical regardless of that scenario's own erase/zoom/theta/hue. Backing
-  /// the preset's apply-time up by 1 s (≫ any `smoothMs`) means every ramp has already fully
-  /// settled to its intended, small per-frame target before frame 0 ever samples it — the
-  /// same "recall happens, THEN the performance starts" ordering a real session has, just
-  /// made explicit here since this harness has no idle warm-up frames of its own.
+  /// **The preset is applied a full second BEFORE frame 0's clock (`at: -1`, not `at: 0`).**
+  /// `ControlRouter`'s 7 ramped slots (`LinearRamp`, ~100 ms `smoothMs`) glide toward a
+  /// recalled preset's mapped targets, and a scenario preset can differ from the cold-start
+  /// seed on any of them (`zoom`/`theta`/`panX`/`panY` in particular, which still seed at
+  /// mapped raw-0). Applying the preset AT frame 0's own timestamp would mean
+  /// `LinearRamp.value(at:)` (its `elapsedMs <= 0` branch) hands back the pre-glide value on
+  /// the very frame being captured, and the first few frames would render a control vector
+  /// that is neither the seed nor the preset. Backing the apply-time up by 1 s (≫ any
+  /// `smoothMs`) means every ramp has already fully settled to its intended target before
+  /// frame 0 ever samples it — the same "recall happens, THEN the performance starts"
+  /// ordering a real session has, just made explicit here since this harness has no idle
+  /// warm-up frames of its own.
+  ///
+  /// This used to be load-bearing against a much worse failure: the three HSL ramps were
+  /// once seeded at the gen `param` defaults (hue 0.02, sat/light 0.5) as if those were a
+  /// glide ORIGIN, so an `at: 0` apply fed the feedback plane HSL deltas 10-50× larger than
+  /// any the map can produce for 2-3 frames, clipping every scenario to a stable white fixed
+  /// point. `ControlRouter.coldStartSeed` no longer does that (see its note on why the param
+  /// defaults are not a glide origin); the `at: -1` convention stays for the ordinary
+  /// settle-before-capture reason above.
   public static func render(_ scenario: Scenario, context: MetalContext) throws -> [SIMD4<Float>] {
     let engine = try Engine(context: context)
     engine.setResolution(scenario.size)
