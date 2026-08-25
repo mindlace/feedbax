@@ -15,6 +15,17 @@ final class EngineViewModelTests: XCTestCase {
     XCTAssertEqual(EngineViewModel.range(for: .saturation), 0.0...1.0,
                    "sat is the one unipolar slot (spec §04 §1.2)")
   }
+  /// The webUI faders are `slider` widgets with `size 2, min −1` (BRIGHTNESS, HUE-SHIFT, ZOOM,
+  /// rotate) or `size 1` (SATURATION); their number boxes show the INTERNAL value, so Max's
+  /// "BRIGHTNESS 1." is raw 0.0 and "HUE 1.1" is raw 0.1. rotate is negated on its way into
+  /// slot 6 (`* -1.`). (diagnosis doc, "The control vector actually in the screenshots")
+  func testMaxPanelValueConvention() {
+    XCTAssertEqual(EngineViewModel.maxPanelValue(for: .bias, raw: 0), 1.0, accuracy: 1e-9)
+    XCTAssertEqual(EngineViewModel.maxPanelValue(for: .hue, raw: 0.1), 1.1, accuracy: 1e-9)
+    XCTAssertEqual(EngineViewModel.maxPanelValue(for: .zoom, raw: -0.25), 0.75, accuracy: 1e-9)
+    XCTAssertEqual(EngineViewModel.maxPanelValue(for: .theta, raw: 0.26092), 0.73908, accuracy: 1e-6)
+    XCTAssertEqual(EngineViewModel.maxPanelValue(for: .saturation, raw: 0.5), 0.5, accuracy: 1e-9)
+  }
   func testToggleEmitsEvent() {
     let vm = EngineViewModel()
     vm.setSInvert(true)

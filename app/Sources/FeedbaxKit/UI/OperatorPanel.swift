@@ -58,7 +58,13 @@ public struct OperatorPanel: View {
           // NOT one of the 9 shadeCtl slots — a direct `ControlRouter.eraseControl` write
           // (`EngineViewModel.setErase`'s own doc comment), so it isn't in `sliderLabels` above.
           LabeledContent("TRANSPARANCY") {
-            Slider(value: Binding(get: { vm.eraseValue }, set: { vm.setErase($0) }), in: 0...1)
+            HStack(spacing: 8) {
+              Slider(value: Binding(get: { vm.eraseValue }, set: { vm.setErase($0) }), in: 0...1)
+              Text(String(format: "%.2f", vm.eraseValue))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
+            }
           }
         }
         Section("Toggles") {
@@ -145,11 +151,20 @@ public struct OperatorPanel: View {
   }
 
   private func slider(_ label: String, slot: ControlSlot) -> some View {
-    LabeledContent(label) {
-      Slider(
-        value: Binding(get: { vm.sliderValues[slot] ?? 0 }, set: { vm.slider(slot, changedTo: $0) }),
-        in: EngineViewModel.range(for: slot)
-      )
+    let raw = vm.sliderValues[slot] ?? 0
+    return LabeledContent(label) {
+      HStack(spacing: 8) {
+        Slider(
+          value: Binding(get: { vm.sliderValues[slot] ?? 0 }, set: { vm.slider(slot, changedTo: $0) }),
+          in: EngineViewModel.range(for: slot)
+        )
+        // The original panel's reading for this fader (its number boxes show the slider's
+        // internal value, not the sent one) — see EngineViewModel.maxPanelValue.
+        Text(String(format: "%.2f", EngineViewModel.maxPanelValue(for: slot, raw: raw)))
+          .monospacedDigit()
+          .foregroundStyle(.secondary)
+          .frame(width: 44, alignment: .trailing)
+      }
     }
   }
 }

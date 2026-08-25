@@ -88,6 +88,19 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     }
   }
 
+  /// The number the original's panel shows for a slot. Its faders are `slider` widgets with
+  /// `size 2, min −1` (raw = internal − 1) except SATURATION (`size 1`, raw = internal); the
+  /// rotate fader is negated into slot 6 by `* -1.`, so its reading is `1 − raw`. Shown next
+  /// to each slider so "the same settings as Max" can be dialled in by number
+  /// (docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md).
+  public static func maxPanelValue(for slot: ControlSlot, raw: Double) -> Double {
+    switch slot {
+    case .saturation: return raw
+    case .theta: return 1 - raw
+    default: return raw + 1
+    }
+  }
+
   // MARK: - Toggles (spec §04 §1's toggle table; queued exactly like a slot write)
 
   @Published public private(set) var sInvertOn = false
