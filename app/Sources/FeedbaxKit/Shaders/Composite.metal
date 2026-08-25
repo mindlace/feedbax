@@ -92,14 +92,8 @@ fragment float4 fbx_point_f(WaveVertexOut in [[stage_in]],
   return u.color;
 }
 
-// Jitter `erase` with blending on = translucent quad over the old frame (spec §01 §2):
-// rgb' = a·erase.rgb + (1−a)·prev.rgb ; a' = a·a + (1−a)·prev.a
-kernel void fbx_erase(texture2d<float, access::read> prev [[texture(0)]],
-                      texture2d<float, access::write> current [[texture(1)]],
-                      constant float4& erase [[buffer(0)]],     // rgb + α in .w
-                      uint2 gid [[thread_position_in_grid]]) {
-  if (gid.x >= current.get_width() || gid.y >= current.get_height()) return;
-  float4 p = prev.read(gid);
-  float a = erase.w;
-  current.write(float4(mix(p.rgb, erase.rgb, a), a * a + (1 - a) * p.a), gid);
-}
+// Erase is a hard clear of the back-buffer's render pass to (erase_color, erase_alpha) —
+// see FeedbackCore.renderFrame's step 1 — matching `jit.gl.node`'s FBO clear
+// (docs/diagnosis-2026-08-23.md, "Trail-fade parity"). The erase alpha only sets the
+// destination alpha of undrawn pixels; no shader kernel is needed for it, so there is no
+// `fbx_erase` here (the old gl2-parity soft-mix kernel this file used to define).

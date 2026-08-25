@@ -20,21 +20,29 @@ final class FeedbackCoreTests: XCTestCase {
                  lightDelta: 0, eraseAlpha: erase)
   }
 
-  func testEraseResidualIsOneMinusAlphaPerFrame() throws {
-    // Seed one white frame, disable the feedback plane (test hook), then run erase-only
-    // frames at α=0.9: residual must be (1−0.9)^n (spec §01 §2).
+  func testEraseIsAHardClearToEraseColorAndAlpha() throws {
+    // Seed one white frame, disable the feedback plane (test hook), then run a single
+    // erase-only frame at α=0.9: `jit.gl.node`'s erase is a hard FBO clear to
+    // (erase_color, erase_alpha) — no residual of the previous (white) frame survives
+    // (docs/diagnosis-2026-08-23.md, "Trail-fade parity").
     let ctx = try MetalContext()
     let core = try makeCore(ctx)
     var p = Self.identityParams(erase: 1.0)
     core.feedbackPlaneEnabled = false
     _ = runFrame(ctx, core, p) { enc in core.drawSolid(enc, color: SIMD4(1, 1, 1, 1)) }
+
     p.eraseAlpha = 0.9
-    var value: Float = 1
-    for i in 1...3 {
-      let px = runFrame(ctx, core, p, index: i)
-      value *= 0.1
-      XCTAssertEqual(px[0].x, value, accuracy: 3.0 / 255, "frame \(i): residual (1−a)^n")
-    }
+    let px1 = runFrame(ctx, core, p, index: 1)
+    XCTAssertEqual(px1[0].x, p.eraseColor.x, accuracy: 3.0 / 255, "hard clear: no rgb residual")
+    XCTAssertEqual(px1[0].y, p.eraseColor.y, accuracy: 3.0 / 255, "hard clear: no rgb residual")
+    XCTAssertEqual(px1[0].z, p.eraseColor.z, accuracy: 3.0 / 255, "hard clear: no rgb residual")
+    XCTAssertEqual(px1[0].w, 0.9, accuracy: 3.0 / 255, "clear alpha == eraseAlpha")
+
+    // A second frame at a different eraseAlpha must land exactly that alpha too — the
+    // clear alpha must not accumulate/blend across frames.
+    p.eraseAlpha = 0.85
+    let px2 = runFrame(ctx, core, p, index: 2)
+    XCTAssertEqual(px2[0].w, 0.85, accuracy: 3.0 / 255, "clear alpha does not accumulate across frames")
   }
 
   func testFeedbackBlendIsSrcAlphaDstAlpha() throws {

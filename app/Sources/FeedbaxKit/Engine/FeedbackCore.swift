@@ -152,7 +152,6 @@ public final class FeedbackCore {
   /// This frame's write target. Becomes `accumulator` after the pointer swap.
   private var back: MTLTexture
   private let warp: WarpPass
-  private let erasePipeline: MTLComputePipelineState
   private let quad: QuadRenderer
   /// Test/instrumentation hook: skips step 4 (the past-over composite) so erase-only and
   /// seed-only arithmetic can be verified in isolation. Golden runs always leave this true.
@@ -162,7 +161,6 @@ public final class FeedbackCore {
     self.context = context
     self.format = format
     self.warp = try WarpPass(context: context)
-    self.erasePipeline = try context.computePipeline("fbx_erase")
     self.quad = try QuadRenderer(context: context, pixelFormat: format)
     self.accumulator = FeedbackCore.makeAccumulatorTexture(context: context, format: format,
                                                             width: size.x, height: size.y)
@@ -175,19 +173,26 @@ public final class FeedbackCore {
   }
 
   /// The frame recipe (spec §01 §1 + design README; ordering is load-bearing):
-  /// 1. erase `accumulator` toward `params.eraseColor` into `back`
+  /// 1. erase: hard-clear `back` to `(params.eraseColor, params.eraseAlpha)` — this
+  ///    matches `jit.gl.node`'s FBO clear (docs/diagnosis-2026-08-23.md, "Trail-fade
+  ///    parity"), not the old gl2 "translucent quad over the old frame" model. No residual
+  ///    of `accumulator`'s previous contents survives; persistence comes entirely from the
+  ///    warped feedback plane redrawn in step 4.
   /// 2. warp `accumulator` (last completed frame) → a freshly leased texture
-  /// 3. seeds under: caller draws into `back` (loaded, not cleared) with normal blending
+  /// 3. seeds under: caller draws into the freshly cleared `back` with normal blending
   /// 4. past over: draw the warped texture as the feedback plane, (srcα, dstα) blend
   /// 5. swap — `back` becomes the new `accumulator`, no copy
   public func renderFrame(_ frame: FrameContext, params: RenderParams,
                           drawSeeds: (MTLRenderCommandEncoder) -> Void) -> MTLTexture {
-    encodeErase(frame, from: accumulator, to: back, params: params)                    // 1
-    let warped = warp.encode(frame, previous: accumulator, params: params.warpParams)  // 2
+    let warped = warp.encode(frame, previous: accumulator, params: params.warpParams)  // 2 (reads accumulator before it's touched)
 
     let rp = MTLRenderPassDescriptor()
     rp.colorAttachments[0].texture = back
-    rp.colorAttachments[0].loadAction = .load     // keep the erase kernel's output as the base
+    rp.colorAttachments[0].loadAction = .clear    // 1: hard clear — no soft-mix residual
+    rp.colorAttachments[0].clearColor = MTLClearColor(red: Double(params.eraseColor.x),
+                                                       green: Double(params.eraseColor.y),
+                                                       blue: Double(params.eraseColor.z),
+                                                       alpha: Double(params.eraseAlpha))
     rp.colorAttachments[0].storeAction = .store
     let enc = frame.commandBuffer.makeRenderCommandEncoder(descriptor: rp)!
     drawSeeds(enc)                                                                     // 3
@@ -229,23 +234,6 @@ public final class FeedbackCore {
   /// color; the spec-math tests' tolerances (3/255) depend on this being unblended.
   public func drawSolid(_ enc: MTLRenderCommandEncoder, color: SIMD4<Float>) {
     quad.drawSolid(enc, transform: matrix_identity_float4x4, color: color)
-  }
-
-  /// Step 1 of the frame recipe: `fbx_erase` (Shaders/Composite.metal) reads `prev`,
-  /// writes `current` — no blending state needed, and it doubles as the ping-pong copy
-  /// (`current` starts this frame holding the erased base that seeds/plane draw over).
-  private func encodeErase(_ frame: FrameContext, from prev: MTLTexture, to current: MTLTexture,
-                           params: RenderParams) {
-    var erase = SIMD4(params.eraseColor.x, params.eraseColor.y, params.eraseColor.z, params.eraseAlpha)
-    let enc = frame.commandBuffer.makeComputeCommandEncoder()!
-    enc.setComputePipelineState(erasePipeline)
-    enc.setTexture(prev, index: 0)
-    enc.setTexture(current, index: 1)
-    enc.setBytes(&erase, length: MemoryLayout<SIMD4<Float>>.stride, index: 0)
-    let tg = MTLSize(width: 16, height: 16, depth: 1)
-    enc.dispatchThreadgroups(MTLSize(width: (current.width + 15) / 16, height: (current.height + 15) / 16, depth: 1),
-                             threadsPerThreadgroup: tg)
-    enc.endEncoding()
   }
 
   /// Persistent (not pool-leased) ping-pong texture. Deliberately bypasses
