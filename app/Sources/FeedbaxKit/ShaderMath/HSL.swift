@@ -2,8 +2,10 @@ import simd
 
 /// Standard HSL/HSV conversions, hue in [0,1). These mirror the Jitter gen operators
 /// rgb2hsl/hsl2rgb used by the shaderfx HSL pix (spec §01 §4-5): the shift is ADDITIVE
-/// in HSL space, hue wraps mod 1, sat/light clamp — which is exactly what turns a
-/// per-frame ±0.05 hue delta into the slow rainbow drift.
+/// in HSL space and hue wraps mod 1. S and L are deliberately NOT clamped — Jitter's own
+/// `cc.hsl2rgb.jxs` converts the raw values and the char texture then clips each RGB
+/// channel, and above S = 1 that pair is the saturation fader's per-pixel gain
+/// (docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md, term 2).
 public func rgb2hsl(_ c: SIMD3<Float>) -> SIMD3<Float> {
   let maxc = max(c.x, max(c.y, c.z)), minc = min(c.x, min(c.y, c.z))
   let l = (maxc + minc) / 2
@@ -49,8 +51,6 @@ public func rgb2hsv(_ c: SIMD3<Float>) -> SIMD3<Float> {
 
 public func hslAdd(_ rgb: SIMD3<Float>, hueShift: Float, satDelta: Float, lightDelta: Float) -> SIMD3<Float> {
   var hsl = rgb2hsl(rgb) + SIMD3(hueShift, satDelta, lightDelta)
-  hsl.x = hsl.x - floor(hsl.x)                      // hue wraps
-  hsl.y = min(max(hsl.y, 0), 1)                     // sat clips
-  hsl.z = min(max(hsl.z, 0), 1)                     // light clips
-  return hsl2rgb(hsl)
+  hsl.x = hsl.x - floor(hsl.x)                      // hue wraps; S and L pass through
+  return simd_clamp(hsl2rgb(hsl), SIMD3(repeating: 0), SIMD3(repeating: 1))   // char-texture clip
 }

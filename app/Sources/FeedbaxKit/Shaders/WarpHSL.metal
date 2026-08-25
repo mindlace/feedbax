@@ -86,6 +86,8 @@ kernel void fbx_warp_hsl(texture2d<float, access::sample> prev [[texture(0)]],
 
   float3 hsl = rgb2hsl(color.rgb) + float3(p.hueShift, p.satDelta, p.lightDelta);
   hsl.x = fract(hsl.x);
-  hsl.yz = clamp(hsl.yz, 0.0, 1.0);
-  outTex.write(float4(hsl2rgb(hsl), color.a), gid);
+  // No S/L clamp — Jitter's cc.hsl2rgb.jxs converts the raw values and the char texture
+  // clips each RGB channel afterwards; above S = 1 that is the saturation fader's per-pixel
+  // gain (diagnosis doc, term 2). Mirrors ShaderMath/HSL.swift's hslAdd.
+  outTex.write(float4(clamp(hsl2rgb(hsl), 0.0, 1.0), color.a), gid);
 }

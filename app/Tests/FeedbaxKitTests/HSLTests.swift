@@ -19,18 +19,30 @@ final class HSLTests: XCTestCase {
     let cyan = rgb2hsl(SIMD3(0, 1, 1))
     XCTAssertEqual(cyan.x, 0.5, accuracy: 1e-5)
   }
-  func testHueWrapsSatLightClip() {
-    // Additive shift: hue wraps mod 1; sat/light clamp (design checklist #5, spec §01 §5).
-    // Red shifted by hue +1/3 → green.
+  func testHueWrapsAndLightnessClipsThroughRGB() {
+    // Additive shift: hue wraps mod 1 (spec §01 §5). Red shifted by hue +1/3 → green.
     let g = hslAdd(SIMD3(1, 0, 0), hueShift: 1.0 / 3.0, satDelta: 0, lightDelta: 0)
     XCTAssertEqual(g.y, 1, accuracy: 1e-4); XCTAssertEqual(g.x, 0, accuracy: 1e-4)
     // hue 0.9 + 0.2 wraps to 0.1, not clamps to 1.0
     let wrapped = hslAdd(hsl2rgb(SIMD3(0.9, 1, 0.5)), hueShift: 0.2, satDelta: 0, lightDelta: 0)
-    let h = rgb2hsl(wrapped).x
-    XCTAssertEqual(h, 0.1, accuracy: 1e-3)
-    // lightness clips at 1 (white), does not wrap
+    XCTAssertEqual(rgb2hsl(wrapped).x, 0.1, accuracy: 1e-3)
+    // A huge lightness delta still ends at white — but via the per-channel RGB clip that the
+    // original's char texture applies, not an HSL-space clamp.
     let white = hslAdd(SIMD3(0.5, 0.5, 0.5), hueShift: 0, satDelta: 0, lightDelta: 5)
-    XCTAssertEqual(white.x, 1, accuracy: 1e-5)
+    XCTAssertEqual(white, SIMD3(1, 1, 1))
+  }
+  /// Jitter's `cc.hsl2rgb.jxs` has no S/L clamp: with S = 1 + δ, `q = L·(1 + S)` grows the
+  /// max channel by (1 + δ/2) while the min channel goes negative and clips to 0. This is the
+  /// SATURATION fader's per-pixel gain — the term the port was missing (diagnosis doc, term 2).
+  func testSaturationAboveOneIsAGainOnAlreadySaturatedPixels() {
+    let out = hslAdd(SIMD3(0.4, 0.2, 0), hueShift: 0, satDelta: 0.035, lightDelta: 0)
+    XCTAssertEqual(out.x, 0.4 * 1.0175, accuracy: 1e-3, "max channel × (1 + δ/2)")
+    XCTAssertEqual(out.y, 0.2, accuracy: 1e-3, "mid channel unchanged for this hue")
+    XCTAssertEqual(out.z, 0, accuracy: 1e-6, "min channel clips at 0, never below")
+  }
+  func testNegativeLightnessClipsToBlack() {
+    let out = hslAdd(SIMD3(0.002, 0.001, 0), hueShift: 0, satDelta: 0, lightDelta: -0.004)
+    XCTAssertEqual(out, SIMD3(0, 0, 0))
   }
   func testRgb2HsvKnownValues() {
     let v = rgb2hsv(SIMD3(1, 0, 0))  // needed by the chroma keyer (Task 5)
