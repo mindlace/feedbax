@@ -90,16 +90,30 @@ public final class GamepadSurface: ControlSurface {
   private var previousButtons: Set<String> = []
   private var previousDpad = SIMD2<Float>.zero
 
-  /// Per-button flip memory for the 4 buttons carrying a `ToggleEvent` with an associated
-  /// Bool — same idiom as `KeyboardTrackpadSurface.toggleState`.
-  private var buttonFlipState: [String: Bool] = [:]
+  /// Whether each stick was OUTSIDE its deadzone on the PREVIOUS poll, keyed by the `x` slot
+  /// passed to `assertStick` (`.panX` for the left stick, `.hue` for the right) — the edge
+  /// `assertStick` detects against so a stick released back into the deadzone asserts exactly
+  /// 0.0 once (final review, finding 2b) instead of silently doing nothing forever and leaving
+  /// `ControlRouter.rawSlots` pinned at whatever nonzero value the stick last reported before
+  /// centering. `ControlRouter` never resets a slot on its own — every surface is responsible
+  /// for asserting its own "back to rest" transition, the same discipline the buttons/d-pad
+  /// above already follow via `previousButtons`/`previousDpad`.
+  private var previousStickOutsideDeadzone: [ControlSlot: Bool] = [:]
+
+  /// The live truth this surface's buttons compute their next flip FROM, instead of keeping
+  /// their own memory (finding 4, final review — see `ControlStateSnapshot`'s own doc comment).
+  /// Defaults to `.constant(false)`: a bare unit test that doesn't care about cross-surface
+  /// reconciliation gets the same "nothing has been pressed yet" starting behavior this type
+  /// always had.
+  private let stateSnapshot: ControlStateSnapshot
 
   private var connectObserver: NSObjectProtocol?
 
   /// Subscribes to `GCController` connect notifications so a pad plugged in mid-session is
   /// picked up by `liveState()` on the next poll (`GCController.controllers()` reflects
   /// currently-connected pads; the notification is just for logging visibility here).
-  public init() {
+  public init(stateSnapshot: ControlStateSnapshot = .constant(false)) {
+    self.stateSnapshot = stateSnapshot
     connectObserver = NotificationCenter.default.addObserver(
       forName: .GCControllerDidConnect, object: nil, queue: nil
     ) { notification in
@@ -168,10 +182,10 @@ public final class GamepadSurface: ControlSurface {
     var toggles: [ToggleEvent] = []
     for button in pressed.subtracting(previousButtons) {
       switch button {
-      case "a": toggles.append(flip(.sInvert(true), for: "a"))
-      case "b": toggles.append(flip(.layerEnabled(true), for: "b"))
-      case "x": toggles.append(flip(.wave1Enabled(true), for: "x"))
-      case "y": toggles.append(flip(.wave2Enabled(true), for: "y"))
+      case "a": toggles.append(flip(.sInvert(true)))
+      case "b": toggles.append(flip(.layerEnabled(true)))
+      case "x": toggles.append(flip(.wave1Enabled(true)))
+      case "y": toggles.append(flip(.wave2Enabled(true)))
       case "menu": toggles.append(.fullscreen)   // one-shot — no flip state, like keyboard "f"
       default: break   // unrecognized button name: ignore
       }
@@ -179,21 +193,37 @@ public final class GamepadSurface: ControlSurface {
     return toggles
   }
 
-  private func flip(_ template: ToggleEvent, for button: String) -> ToggleEvent {
-    let isOn = !(buttonFlipState[button] ?? false)
-    buttonFlipState[button] = isOn
-    return template.resolvingFlip(isOn)
+  /// Computes the NEXT flip value from `stateSnapshot`'s live truth (finding 4, final review) —
+  /// this surface no longer keeps its own independent on/off memory per button; see
+  /// `ControlStateSnapshot`'s doc comment for why that memory could desync from what the
+  /// engine/router/operator panel actually show. Unlike `KeyboardTrackpadSurface.resolveToggles`
+  /// this needs no same-poll chaining: `togglesFrom`'s `pressed.subtracting(previousButtons)` is
+  /// a `Set` diff, so a given button appears in `toggles` at most once per `poll` call.
+  private func flip(_ template: ToggleEvent) -> ToggleEvent {
+    let current = stateSnapshot.current(for: template) ?? false
+    return template.resolvingFlip(!current)
   }
 
   /// Radial (magnitude-based) deadzone: below 0.08, the stick asserts neither axis at all —
   /// avoids the directional bias a per-axis deadzone would introduce near the diagonals. Above
   /// the threshold, the raw axis values pass straight through unscaled — sticks already report
   /// in the −1...1 range `ControlRouter.mappedTarget` expects for `panX`/`panY`/`hue`/`bias`.
+  ///
+  /// Finding 2b (final review): a stick that WAS outside the deadzone and just moved back
+  /// inside must assert exactly 0.0 once — the outside→inside edge, tracked per-stick in
+  /// `previousStickOutsideDeadzone` — or `ControlRouter.rawSlots` stays pinned at the last
+  /// outside-deadzone value forever, since nothing else ever tells it to go back to rest.
   private func assertStick(_ v: SIMD2<Float>, x: ControlSlot, y: ControlSlot,
                             into slots: inout [ControlSlot: Float]) {
-    guard simd_length(v) >= Self.stickDeadzone else { return }
-    slots[x] = v.x
-    slots[y] = v.y
+    let outside = simd_length(v) >= Self.stickDeadzone
+    defer { previousStickOutsideDeadzone[x] = outside }
+    if outside {
+      slots[x] = v.x
+      slots[y] = v.y
+    } else if previousStickOutsideDeadzone[x] == true {
+      slots[x] = 0
+      slots[y] = 0
+    }
   }
 
   private static func liveState() -> GamepadState? {

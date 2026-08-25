@@ -50,18 +50,37 @@ public final class AppBootstrap {
     let audioSampleRate: Float = probeSampleRate > 0 ? Float(probeSampleRate) : 48000
 
     let context = try MetalContext()
-    let engine = try Engine(context: context, audioSampleRate: audioSampleRate)
+    let engine = try Engine(context: context, audioSampleRate: audioSampleRate,
+                            stickerFolder: Self.resolveStickerFolder())
     // Reproduces the original's webUI loadbang (spec §04 §1.1) — the exact vector every fresh
     // session actually starts from.
     engine.router.applyStartupDefaults(at: 0)
 
     let bindings = try BindingsLoader.load(from: nil)
-    let keyboard = KeyboardTrackpadSurface(bindings: bindings)
-    let gamepad = GamepadSurface()
+    // Single source of truth for every flip-carrying toggle (final review, finding 4) — both
+    // flip-memory surfaces below query this instead of keeping their own independent on/off
+    // memory, which is what let keyboard/gamepad/operator-panel drift out of sync with each
+    // other (a keyboard `i` press could flip the router's real SInvert state while the panel's
+    // toggle kept showing the OLD value, and the panel's own next click then asserted a flip
+    // computed from that stale value on top of an already-flipped truth). See
+    // `ControlStateSnapshot`'s own doc comment.
+    let stateSnapshot = ControlStateSnapshot(
+      sInvert: { engine.router.sInvert < 0 },
+      worldBumpEnabled: { engine.bumpsEnabled.world },
+      waveBumpEnabled: { engine.bumpsEnabled.wave },
+      kittyBumpEnabled: { engine.bumpsEnabled.kitty },
+      wave1Enabled: { engine.waveforms.wave1Enabled },
+      wave2Enabled: { engine.waveforms.wave2Enabled },
+      layerEnabled: { engine.sticker.layer.enabled })
+    let keyboard = KeyboardTrackpadSurface(bindings: bindings, stateSnapshot: stateSnapshot)
+    let gamepad = GamepadSurface(stateSnapshot: stateSnapshot)
     // `EngineViewModel` (Task 20) is registered exactly like keyboard/gamepad — design §5's
     // "the operator UI is a surface, not a privileged path": it queues slot writes/toggles into
     // `poll` the same way a key press or a stick tilt does, and `ControlRouter.tick` arbitrates
-    // it with last-write-wins like any other surface.
+    // it with last-write-wins like any other surface. Its own toggle mirrors reconcile from the
+    // same truth every poll (`EngineViewModel.refreshMirrorsFromTruth`) rather than through this
+    // `ControlStateSnapshot` — it already holds `engine` directly, so a second indirection would
+    // buy nothing.
     let viewModel = EngineViewModel(engine: engine, presetStore: PresetStore())
     // Order matters: later surfaces win ties (`ControlRouter`'s last-writer-wins arbitration,
     // spec §04 §1.2) — keyboard first, gamepad second, operator panel last, so an explicit
@@ -80,5 +99,34 @@ public final class AppBootstrap {
     return AppBootstrap(
       engine: engine, keyboardSurface: keyboard, viewModel: viewModel, audioAnalysis: audioAnalysis
     )
+  }
+
+  /// Resolves where the sticker folder actually lives for a REAL entry point (final review,
+  /// finding 1). `Engine.init`'s own CWD-relative default (`input/transparent-background/`)
+  /// only resolves to anything when the process's current working directory is a repo checkout
+  /// — `swift run`'s case, and every existing test's (`EngineTests`, `EngineViewModelTests`
+  /// changeCurrentDirectoryPath to a fixture, or just tolerate a missing folder). A
+  /// Finder-launched `Feedbax.app` bundle's CWD is `/` (Task 23), so that default resolves to a
+  /// folder that can never exist and the instrument silently starts with `sticker.itemCount ==
+  /// 0` no matter how many PNGs the performer actually has.
+  ///
+  /// Prefers the CWD-relative folder when it's actually there — so a repo checkout with
+  /// `input/transparent-background/` populated keeps behaving exactly as it always has, no
+  /// migration needed for the `swift run` workflow. Otherwise falls back to
+  /// `~/Pictures/Feedbax/stickers/` — a real, discoverable location a performer can drop PNGs
+  /// into without touching the app bundle's own Resources (which Gatekeeper/notarization
+  /// wouldn't allow writing to at runtime anyway), created on demand so a fresh install has
+  /// *somewhere* to scan. An empty freshly-created folder degrades the same way the CWD-relative
+  /// fallback always has — `itemCount == 0`, `StickerSource.init`'s own "nothing to show yet"
+  /// tolerance, not a crash or a thrown error.
+  private static func resolveStickerFolder() -> URL {
+    let cwdFolder = URL(fileURLWithPath: "input/transparent-background", isDirectory: true)
+    if FileManager.default.fileExists(atPath: cwdFolder.path) {
+      return cwdFolder
+    }
+    let picturesFolder = FileManager.default.urls(for: .picturesDirectory, in: .userDomainMask)[0]
+      .appendingPathComponent("Feedbax/stickers", isDirectory: true)
+    try? FileManager.default.createDirectory(at: picturesFolder, withIntermediateDirectories: true)
+    return picturesFolder
   }
 }

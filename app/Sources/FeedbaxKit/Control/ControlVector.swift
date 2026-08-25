@@ -55,3 +55,73 @@ public protocol ControlSurface: AnyObject {
   /// earlier surface (or the previous frame's raw slots) already holds.
   func poll(_ time: TimeInterval) -> ControlWrite?
 }
+
+/// A read-only view onto the engine/router's ACTUAL current boolean state for every toggle that
+/// carries a flip (final review, finding 4). Before this existed, `KeyboardTrackpadSurface` and
+/// `GamepadSurface` each kept their own private per-key/per-button on/off memory, and
+/// `EngineViewModel` kept a third, `@Published`, copy — three independent memories with no
+/// mechanism to reconcile, so a key press could flip the router's real state while the operator
+/// panel's toggle kept showing the OLD value, and the panel's next click then asserted a flip
+/// computed from that stale value on top of an already-flipped truth. This closure bundle is
+/// the single source both flip-memory surfaces now query AT POLL TIME (not at the moment the
+/// key/button physically went down — see `KeyboardTrackpadSurface.resolveToggles`'s doc comment
+/// for why that timing matters) instead of keeping memory of their own.
+///
+/// A plain struct of closures, not a protocol: `AppBootstrap.start()` builds one that reads a
+/// live `Engine` (`router.sInvert`, `bumpsEnabled`, `waveforms.waveNEnabled`,
+/// `sticker.layer.enabled` — all already-queryable truth, nothing new added to `Engine` itself);
+/// tests build one from local fakes with no `Engine`/Metal dependency at all.
+public struct ControlStateSnapshot {
+  public var sInvert: () -> Bool
+  public var worldBumpEnabled: () -> Bool
+  public var waveBumpEnabled: () -> Bool
+  public var kittyBumpEnabled: () -> Bool
+  public var wave1Enabled: () -> Bool
+  public var wave2Enabled: () -> Bool
+  public var layerEnabled: () -> Bool
+
+  public init(sInvert: @escaping () -> Bool, worldBumpEnabled: @escaping () -> Bool,
+              waveBumpEnabled: @escaping () -> Bool, kittyBumpEnabled: @escaping () -> Bool,
+              wave1Enabled: @escaping () -> Bool, wave2Enabled: @escaping () -> Bool,
+              layerEnabled: @escaping () -> Bool) {
+    self.sInvert = sInvert
+    self.worldBumpEnabled = worldBumpEnabled
+    self.waveBumpEnabled = waveBumpEnabled
+    self.kittyBumpEnabled = kittyBumpEnabled
+    self.wave1Enabled = wave1Enabled
+    self.wave2Enabled = wave2Enabled
+    self.layerEnabled = layerEnabled
+  }
+
+  /// Looks up the live truth for whichever boolean-carrying case `template` is — its OWN
+  /// associated Bool is ignored, this returns what the engine/router actually holds right now,
+  /// the value `resolvingFlip` should be handed the OPPOSITE of. `.fullscreen`/`.stillCapture`
+  /// are one-shot UI actions with no persistent on/off state to query (`ToggleEvent`'s own doc
+  /// comment), so this returns `nil` for them — callers fall back to firing them unconditionally
+  /// via `resolvingFlip`'s own pass-through for those two cases.
+  public func current(for template: ToggleEvent) -> Bool? {
+    switch template {
+    case .sInvert: return sInvert()
+    case .worldBumpEnabled: return worldBumpEnabled()
+    case .waveBumpEnabled: return waveBumpEnabled()
+    case .kittyBumpEnabled: return kittyBumpEnabled()
+    case .wave1Enabled: return wave1Enabled()
+    case .wave2Enabled: return wave2Enabled()
+    case .layerEnabled: return layerEnabled()
+    case .fullscreen, .stillCapture: return nil
+    }
+  }
+
+  /// Every toggle reads as `value`, unconditionally and forever — the default for a surface
+  /// built with no live `Engine` to query (a bare unit test constructing
+  /// `KeyboardTrackpadSurface`/`GamepadSurface` directly, same as `EngineViewModel()`'s own
+  /// nil-engine convenience). NOT a stand-in for real reconciliation: a test that actually cares
+  /// about the truth-driven flip (finding 4) needs a snapshot that can change between polls,
+  /// e.g. closing over a `var` the test mutates itself to simulate the router having applied a
+  /// previous write.
+  public static func constant(_ value: Bool) -> ControlStateSnapshot {
+    ControlStateSnapshot(sInvert: { value }, worldBumpEnabled: { value }, waveBumpEnabled: { value },
+                         kittyBumpEnabled: { value }, wave1Enabled: { value }, wave2Enabled: { value },
+                         layerEnabled: { value })
+  }
+}

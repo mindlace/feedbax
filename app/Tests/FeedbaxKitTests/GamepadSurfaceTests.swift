@@ -37,4 +37,23 @@ final class GamepadSurfaceTests: XCTestCase {
     let held = s.poll(0.016)
     XCTAssertNil(held, "held button/d-pad must not re-fire")
   }
+
+  /// Final review, finding 2b: a stick that goes outside the deadzone and is then released
+  /// back inside it must assert exactly 0.0 ONCE on that transition — otherwise
+  /// `ControlRouter.rawSlots` stays pinned at the last outside-deadzone value forever, since
+  /// nothing else ever tells it the stick is back at rest.
+  func testStickReleasedIntoDeadzoneAssertsZeroOnceThenNothing() {
+    var pad = FakePad(); pad.leftStick = SIMD2(1, 0)
+    let s = GamepadSurface()
+    s.stateProvider = { pad }
+    let outside = s.poll(0)
+    XCTAssertEqual(outside?.slots[.panX] ?? -99, 1, accuracy: 1e-4, "outside the deadzone: asserts the raw value")
+
+    pad.leftStick = SIMD2(0.02, 0)   // released back inside the 0.08 deadzone
+    let released = s.poll(0.016)
+    XCTAssertEqual(released?.slots[.panX] ?? -99, 0, accuracy: 1e-6, "outside→inside transition asserts exactly 0 once")
+    XCTAssertEqual(released?.slots[.panY] ?? -99, 0, accuracy: 1e-6)
+
+    XCTAssertNil(s.poll(0.032), "already at rest — no further reassertion")
+  }
 }

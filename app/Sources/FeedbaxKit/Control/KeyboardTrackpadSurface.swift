@@ -7,15 +7,23 @@ import Foundation
 ///
 /// Two kinds of state, matching the two kinds of thing a performer does with this surface:
 /// - **Accumulators** (`panX`/`panY`/`zoom`/`hue`/`theta`) behave like the original's sliders
-///   — a gesture nudges a held position, clamped to −1...1, and `poll` keeps asserting that
-///   position every frame while it's nonzero (mirrors the original's `mIniCtlSmooth` inputs,
-///   which hold their last value until moved again).
+///   — a gesture nudges a held position, clamped to −1...1, and `poll` asserts that position
+///   the frame it CHANGES (mirrors every other surface's message-on-change contract — see
+///   `lastAsserted`'s own doc comment for why "keeps asserting every frame while nonzero," this
+///   type's original behavior, was a bug, not a feature).
 /// - **Toggles and the erase step** are one-shot events: `poll` hands back whatever queued
 ///   since the last call and drains the queue, same as the original's hard cuts.
 public final class KeyboardTrackpadSurface: ControlSurface {
   public let id = "keyboard-trackpad"
 
   private let bindings: Bindings
+
+  /// The live truth this surface's toggles compute their next flip FROM, instead of keeping
+  /// their own memory (finding 4, final review — see `ControlStateSnapshot`'s own doc comment).
+  /// Defaults to `.constant(false)`: a bare unit test that doesn't care about cross-surface
+  /// reconciliation gets the same "nothing has been pressed yet" starting behavior this type
+  /// always had.
+  private let stateSnapshot: ControlStateSnapshot
 
   /// Held position per trackpad-bound slot, clamped −1...1 — the raw range shared by every
   /// slot these three gestures touch (`ControlRouter.mappedTarget`: hue/panX/panY/zoom/theta
@@ -24,13 +32,28 @@ public final class KeyboardTrackpadSurface: ControlSurface {
   /// — nothing here for an untouched slot to filter.
   private var accumulators: [ControlSlot: Float] = [:]
 
-  /// Per-key on/off memory for every key `bindings.keys` maps to a `ToggleEvent`. This is
-  /// what actually resolves the flip `Bindings`' placeholder Bool can't (see `Bindings`' doc
-  /// comment) — first press of a key flips it `true`, second flips back to `false`, and so on.
-  private var toggleState: [String: Bool] = [:]
+  /// What `poll` last ASSERTED for each slot (not the last raw gesture) — final review finding
+  /// 2: `poll` previously reasserted every nonzero accumulator on EVERY call, which meant a
+  /// touched slot's held value permanently overrode whatever the gamepad or operator panel
+  /// wrote to that same slot afterward (surface order is `[keyboard, gamepad, viewModel]`;
+  /// later surfaces are only supposed to win TIES within a frame, not lose to a stale earlier
+  /// one on every subsequent frame). `ControlRouter.rawSlots` already holds a slot's value
+  /// between frames on its own — this surface only needs to assert a CHANGE, exactly like
+  /// `GamepadSurface`'s edge-triggered buttons/d-pad and `EngineViewModel`'s "asserted once
+  /// then drained" sliders (that method's own doc comment). Diffing the ACCUMULATOR against
+  /// this, not against the previous accumulator snapshot directly, is what makes a gesture that
+  /// nudges a slot back to a value it already held (e.g. a scroll that overshoots and corrects)
+  /// correctly assert nothing on the second poll — same "diff the target, not the input"
+  /// principle `ControlRouter.lastRampTarget` uses for ramp retargeting.
+  private var lastAsserted: [ControlSlot: Float] = [:]
 
-  /// Toggle events queued since the last `poll`, drained whole on read.
-  private var pendingToggles: [ToggleEvent] = []
+  /// Toggle TEMPLATES queued by `keyDown` since the last `poll` — deliberately NOT yet resolved
+  /// to a concrete on/off Bool. Resolution happens in `poll`, via `resolveToggles`, against
+  /// `stateSnapshot`'s truth AT THAT MOMENT — not decided here at keydown time — so a truth
+  /// change from ANOTHER surface (the gamepad, the operator panel, a preset recall) that lands
+  /// between this keypress and this surface's next poll is what the flip actually resolves
+  /// against (finding 4's own test: "keyboard's next `i` press emits the CORRECT next value").
+  private var pendingToggleTemplates: [ToggleEvent] = []
 
   /// Pending erase nudge, drained on read. `[`/`]` are hardcoded here rather than data-driven
   /// through `Bindings.keys` — deliberately: `ToggleEvent` has no case that carries a signed
@@ -41,8 +64,9 @@ public final class KeyboardTrackpadSurface: ControlSurface {
 
   private static let eraseStepMagnitude: Float = 0.05
 
-  public init(bindings: Bindings) {
+  public init(bindings: Bindings, stateSnapshot: ControlStateSnapshot = .constant(false)) {
     self.bindings = bindings
+    self.stateSnapshot = stateSnapshot
   }
 
   public func keyDown(_ key: String) {
@@ -55,9 +79,7 @@ public final class KeyboardTrackpadSurface: ControlSurface {
       return
     }
     guard let template = bindings.keys[key] else { return }   // unbound key: no-op
-    let isOn = !(toggleState[key] ?? false)
-    toggleState[key] = isOn
-    pendingToggles.append(template.resolvingFlip(isOn))
+    pendingToggleTemplates.append(template)
   }
 
   /// Two-finger drag — the original's shader-pan touch role (design §5).
@@ -78,15 +100,44 @@ public final class KeyboardTrackpadSurface: ControlSurface {
   }
 
   public func poll(_ time: TimeInterval) -> ControlWrite? {
-    let slots = accumulators.filter { $0.value != 0 }   // "while nonzero" — design §5's partial write
-    let toggles = pendingToggles
+    // Message-on-change (finding 2): only a slot whose accumulator differs from what was last
+    // ASSERTED goes out this poll — see `lastAsserted`'s own doc comment.
+    var slots: [ControlSlot: Float] = [:]
+    for (slot, value) in accumulators where lastAsserted[slot] != value {
+      slots[slot] = value
+      lastAsserted[slot] = value
+    }
+    let toggles = resolveToggles()
     let eraseStep = pendingEraseStep
-    pendingToggles = []
     pendingEraseStep = nil
     if slots.isEmpty && toggles.isEmpty && eraseStep == nil {
       return nil   // assert nothing this frame — ControlRouter falls through (spec §04 §1.2)
     }
     return ControlWrite(slots: slots, toggles: toggles, eraseStep: eraseStep)
+  }
+
+  /// Resolves every queued template into a concrete on/off `ToggleEvent`, chained against
+  /// `stateSnapshot`'s live truth (finding 4). The FIRST queued occurrence of a given toggle
+  /// kind flips away from whatever truth currently reads; a SECOND occurrence of the SAME kind
+  /// queued before this same `poll` (a very fast repeated keypress inside one frame interval)
+  /// flips again from what the first one just resolved to, not from truth — truth itself won't
+  /// actually move until this write reaches the router and gets applied, so a same-batch repeat
+  /// has nothing fresher than its own prior resolution to read. Keyed by `ToggleEvent.marker`
+  /// (`Bindings.swift`) since that, not the source key string, is what identifies "the same
+  /// underlying toggle" — two different keys bound to the same `ToggleEvent` case should still
+  /// chain off each other within one batch.
+  private func resolveToggles() -> [ToggleEvent] {
+    guard !pendingToggleTemplates.isEmpty else { return [] }
+    var inFlight: [String: Bool] = [:]
+    let resolved = pendingToggleTemplates.map { template -> ToggleEvent in
+      let marker = template.marker
+      let current = inFlight[marker] ?? stateSnapshot.current(for: template) ?? false
+      let next = !current
+      inFlight[marker] = next
+      return template.resolvingFlip(next)
+    }
+    pendingToggleTemplates = []
+    return resolved
   }
 
   private func accumulate(_ delta: Float, into axis: TrackpadAxis) {

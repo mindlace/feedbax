@@ -57,4 +57,46 @@ final class EngineViewModelTests: XCTestCase {
     XCTAssertEqual(vm.sliderValues[.hue]!, 0.3, accuracy: 1e-6)
     XCTAssertEqual(vm.sliderValues[.saturation]!, 0.9, accuracy: 1e-6)
   }
+
+  /// Final review, finding 4: three independent flip memories (`KeyboardTrackpadSurface`'s old
+  /// per-key `toggleState`, `GamepadSurface`'s old per-button `buttonFlipState`, and this
+  /// class's `@Published` mirrors) never reconciled with each other or with the router's own
+  /// `sInvert`. Single source of truth now: a write applied to the router by ANY surface must
+  /// show up in `EngineViewModel`'s mirror on its very next `poll`, AND `KeyboardTrackpadSurface`
+  /// itself must compute its OWN next flip from that same, now-current truth — not a memory it
+  /// kept locally from before this fix.
+  func testTruthReconciliationAcrossKeyboardAndViewModelAfterAnExternalFlip() throws {
+    let engine = try Engine(context: try MetalContext())
+    engine.router.applyStartupDefaults(at: 0)
+    let vm = EngineViewModel(engine: engine)
+    XCTAssertFalse(vm.sInvertOn)
+
+    // "flip SInvert via keyboard-style write to the router" — apply exactly the `ControlWrite`
+    // ANY surface's `poll` could produce, bypassing `KeyboardTrackpadSurface` entirely (this
+    // stands in for a gamepad press, a preset recall, or any other surface that owns the
+    // router — the point is that it's NOT this view model, and NOT the keyboard surface below).
+    engine.router.apply(ControlWrite(toggles: [.sInvert(true)]), at: 0)
+    XCTAssertTrue(engine.router.sInvert < 0)
+
+    // The view model has no pending write of its own this poll — but must still pick up truth.
+    XCTAssertNil(vm.poll(0), "no pending slots/toggles of its own, so poll still returns nil")
+    XCTAssertTrue(vm.sInvertOn, "mirror must reflect truth after the next poll, not stay stale")
+
+    // Keyboard's next `i` press must compute the CORRECT next value — false, flipping OFF the
+    // inversion an entirely different surface just turned ON — not `true` again, which is what
+    // stale local per-key memory (still believing it had never been pressed) would have emitted.
+    let keyboardSnapshot = ControlStateSnapshot(
+      sInvert: { engine.router.sInvert < 0 },
+      worldBumpEnabled: { engine.bumpsEnabled.world },
+      waveBumpEnabled: { engine.bumpsEnabled.wave },
+      kittyBumpEnabled: { engine.bumpsEnabled.kitty },
+      wave1Enabled: { engine.waveforms.wave1Enabled },
+      wave2Enabled: { engine.waveforms.wave2Enabled },
+      layerEnabled: { engine.sticker.layer.enabled })
+    let keyboard = KeyboardTrackpadSurface(bindings: try BindingsLoader.load(from: nil),
+                                           stateSnapshot: keyboardSnapshot)
+    keyboard.keyDown("i")
+    XCTAssertEqual(keyboard.poll(0)?.toggles, [.sInvert(false)],
+                   "keyboard computes its next flip from live truth, not stale local memory")
+  }
 }

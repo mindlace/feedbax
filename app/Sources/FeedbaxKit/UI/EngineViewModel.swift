@@ -122,12 +122,66 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   /// queued lets `ControlRouter`'s last-write-wins arbitration fall through to whatever the
   /// previous frame's raw slots already hold, same contract every other surface honors.
   public func poll(_ time: TimeInterval) -> ControlWrite? {
+    // Final review, finding 4: refresh every toggle/erase mirror from the engine/router's own
+    // truth right before assembling this frame's write — the same "surfaces don't keep
+    // independent memory, they read truth" discipline `KeyboardTrackpadSurface`/`GamepadSurface`
+    // now follow via `ControlStateSnapshot` (that type's own doc comment). Without this, a flip
+    // applied by a DIFFERENT surface (a keyboard `i` press, a gamepad button, a preset recall)
+    // never reached these `@Published` mirrors, so the operator panel kept showing the OLD
+    // state and its next click asserted a flip computed from that stale value on top of an
+    // already-flipped truth. `poll` runs once per frame on main regardless — this is cheap
+    // enough to just always do, and unconditionally (not only when this surface itself has a
+    // pending write), since truth can move for reasons that have nothing to do with this
+    // object's own queue.
+    refreshMirrorsFromTruth()
     let slots = pendingSlots
     let toggles = pendingToggles
     pendingSlots = [:]
     pendingToggles = []
+    // `refreshMirrorsFromTruth` just read the router/engine as of BEFORE this write reaches
+    // them (the caller — `ControlRouter.tick` — applies `toggles` only after this method
+    // returns), so it can't yet see a flip THIS object itself just queued a moment ago via
+    // `setSInvert`/etc. Left alone, that would revert this frame's mirror back to the
+    // pre-click value for the one tick before truth catches up — an actual regression from
+    // `setSInvert`'s existing "mirror updates immediately, no round-trip lag" contract (this
+    // type's own doc comment). Reapplying `toggles` on top of the truth read keeps that
+    // contract intact while still picking up flips from OTHER surfaces.
+    applyOptimistically(toggles)
     if slots.isEmpty && toggles.isEmpty { return nil }
     return ControlWrite(slots: slots, toggles: toggles)
+  }
+
+  /// The read side of finding 4's single-owner fix — see `poll`'s call site for why this runs
+  /// every frame. `engine == nil` (the bare `EngineViewModel()` unit tests construct) makes this
+  /// a harmless no-op, same as every other engine-touching method in this class.
+  private func refreshMirrorsFromTruth() {
+    guard let engine else { return }
+    sInvertOn = engine.router.sInvert < 0   // `sInvert` is ±1 — ControlRouter's own doc comment
+    layerOn = engine.sticker.layer.enabled  // sticker/movie kept in lockstep — Engine.handle
+    wave1On = engine.waveforms.wave1Enabled
+    wave2On = engine.waveforms.wave2Enabled
+    worldBumpOn = engine.bumpsEnabled.world
+    waveBumpOn = engine.bumpsEnabled.wave
+    kittyBumpOn = engine.bumpsEnabled.kitty
+    eraseValue = Double(engine.router.eraseControl)
+  }
+
+  /// Reapplies this object's OWN just-queued toggles on top of whatever `refreshMirrorsFromTruth`
+  /// just set — see `poll`'s call site comment for why. `.fullscreen`/`.stillCapture` carry no
+  /// mirror to update (one-shot UI actions, `ControlStateSnapshot.current`'s own doc comment).
+  private func applyOptimistically(_ toggles: [ToggleEvent]) {
+    for toggle in toggles {
+      switch toggle {
+      case .sInvert(let on): sInvertOn = on
+      case .worldBumpEnabled(let on): worldBumpOn = on
+      case .waveBumpEnabled(let on): waveBumpOn = on
+      case .kittyBumpEnabled(let on): kittyBumpOn = on
+      case .wave1Enabled(let on): wave1On = on
+      case .wave2Enabled(let on): wave2On = on
+      case .layerEnabled(let on): layerOn = on
+      case .fullscreen, .stillCapture: break
+      }
+    }
   }
 
   // MARK: - Erase (spec §01 §2: outside the 9-slot vector, never ramped, never a `ControlWrite`
