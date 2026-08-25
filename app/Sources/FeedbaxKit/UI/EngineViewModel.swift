@@ -259,6 +259,15 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     engine?.frameRate = rate
   }
 
+  /// Feedback resample filter (diagnosis doc, term 1) — a venue/debug property like
+  /// `frameRate`, not a performed slot. Mirrors `Engine.warpFilter`.
+  @Published public private(set) var warpFilter: WarpFilter = .nearest
+
+  public func setWarpFilter(_ filter: WarpFilter) {
+    warpFilter = filter
+    engine?.warpFilter = filter
+  }
+
   // MARK: - Presets (design §5 Presets — save/recall THROUGH `Engine.capturePreset`/
   // `applyPreset`, the real entry points; NOT `PresetStore.capture` directly, whose toggles/
   // sourceSelection fields are caller-override placeholders per that method's own doc comment)

@@ -14,6 +14,10 @@ public struct RenderParams {
   /// Z offset on the feedback plane — LeapGemini hand-depth in the original (spec §01 §3).
   public var worldBump: Float = 0
 
+  /// Texel read for the previous frame — `.nearest` by default (parity; diagnosis doc,
+  /// term 1). Not a slot and not smoothed; set from `Engine.warpFilter` every frame.
+  public var warpFilter: WarpFilter = .nearest
+
   public init(zoom: Float, theta: Float, offsetPx: SIMD2<Float>, hueShift: Float,
               satDelta: Float, lightDelta: Float, eraseAlpha: Float,
               eraseColor: SIMD3<Float> = .zero, worldBump: Float = 0) {
@@ -26,7 +30,8 @@ public struct RenderParams {
   /// `RenderParams`, in raw pixel units already (no rescale at the seam).
   public var warpParams: WarpParams {
     WarpParams(zoom: zoom, theta: theta, offset: offsetPx,
-              hueShift: hueShift, satDelta: satDelta, lightDelta: lightDelta)
+              hueShift: hueShift, satDelta: satDelta, lightDelta: lightDelta,
+              nearest: warpFilter == .nearest)
   }
 }
 

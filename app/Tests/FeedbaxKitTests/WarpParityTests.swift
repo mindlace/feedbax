@@ -32,6 +32,14 @@ func bilinearSample(_ px: [SIMD4<Float>], size: SIMD2<Int>, at coord: SIMD2<Floa
   return simd_mix(top, bot, SIMD4(repeating: fy))
 }
 
+/// CPU nearest-texel read matching the kernel's `prev.read(uint2(floor(src)))` path
+/// (WarpHSL.metal): texel (floor x, floor y), clamped to the texture.
+func nearestSample(_ px: [SIMD4<Float>], size: SIMD2<Int>, at coord: SIMD2<Float>) -> SIMD4<Float> {
+  let x = min(max(Int(floor(coord.x)), 0), size.x - 1)
+  let y = min(max(Int(floor(coord.y)), 0), size.y - 1)
+  return px[y * size.x + x]
+}
+
 final class WarpParityTests: XCTestCase {
   func testWarpHSLMatchesCPUReference() throws {
     let ctx = try MetalContext()
@@ -42,11 +50,18 @@ final class WarpParityTests: XCTestCase {
             Float.random(in: 0...1, using: &rng), Float.random(in: 0...1, using: &rng))
     }
     let prev = ctx.makeTexture(width: 16, height: 16, format: .rgba16Float, pixels: pixels)
-    let cases: [WarpParams] = [
-      .init(zoom: 1, theta: 0, offset: .zero, hueShift: 0, satDelta: 0, lightDelta: 0),
-      .init(zoom: 0.8, theta: 0.3, offset: SIMD2(3, -2), hueShift: 0.02, satDelta: 0.01, lightDelta: -0.01),
-      .init(zoom: -1.1, theta: -2.5, offset: SIMD2(-40, 25), hueShift: 0.4, satDelta: 0.3, lightDelta: 0.2),
+    let geometry: [(zoom: Float, theta: Float, offset: SIMD2<Float>, hue: Float, sat: Float, light: Float)] = [
+      (1, 0, .zero, 0, 0, 0),
+      (0.8, 0.3, SIMD2(3, -2), 0.02, 0.01, -0.01),
+      (-1.1, -2.5, SIMD2(-40, 25), 0.4, 0.3, 0.2),
     ]
+    var cases: [WarpParams] = []
+    for g in geometry {
+      for nearest in [false, true] {
+        cases.append(.init(zoom: g.zoom, theta: g.theta, offset: g.offset, hueShift: g.hue,
+                           satDelta: g.sat, lightDelta: g.light, nearest: nearest))
+      }
+    }
     let pass = try WarpPass(context: ctx)
     for params in cases {
       let cb = ctx.queue.makeCommandBuffer()!
@@ -59,16 +74,18 @@ final class WarpParityTests: XCTestCase {
         let point = SIMD2(Float(x) + 0.5, Float(y) + 0.5)
         let src = rotaSource(point: point, size: SIMD2(16, 16), zoom: params.zoom,
                              theta: params.theta, offset: params.offset, anchor: params.anchor)
-        let sampled = bilinearSample(pixels, size: size, at: src)
+        let sampled = params.nearest != 0
+          ? nearestSample(pixels, size: size, at: src)
+          : bilinearSample(pixels, size: size, at: src)
         let rgb = hslAdd(SIMD3(sampled.x, sampled.y, sampled.z), hueShift: params.hueShift,
                          satDelta: params.satDelta, lightDelta: params.lightDelta)
         let g = gpu[y * 16 + x]
         // Tolerance: half-precision storage + fract/pow ULP differences. Hue-wrap
         // boundaries can diverge a full hue segment on exact ties; allow rare outliers.
-        XCTAssertEqual(g.x, rgb.x, accuracy: 0.02, "px \(x),\(y)")
-        XCTAssertEqual(g.y, rgb.y, accuracy: 0.02, "px \(x),\(y)")
-        XCTAssertEqual(g.z, rgb.z, accuracy: 0.02, "px \(x),\(y)")
-        XCTAssertEqual(g.w, sampled.w, accuracy: 0.01, "alpha untouched px \(x),\(y)")
+        XCTAssertEqual(g.x, rgb.x, accuracy: 0.02, "px \(x),\(y) nearest=\(params.nearest)")
+        XCTAssertEqual(g.y, rgb.y, accuracy: 0.02, "px \(x),\(y) nearest=\(params.nearest)")
+        XCTAssertEqual(g.z, rgb.z, accuracy: 0.02, "px \(x),\(y) nearest=\(params.nearest)")
+        XCTAssertEqual(g.w, sampled.w, accuracy: 0.01, "alpha untouched px \(x),\(y) nearest=\(params.nearest)")
       } }
       ctx.pool.endFrame()
     }

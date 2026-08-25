@@ -73,6 +73,10 @@ public final class Engine {
   /// legitimately want an odd rate.
   public var frameRate: Int = 60
 
+  /// Feedback resample filter (diagnosis doc, term 1). `.nearest` is parity; `.linear` exists
+  /// only so the two can be A/B'd live from the operator panel.
+  public var warpFilter: WarpFilter = .nearest
+
   /// Current canvas size — what `setResolution` changes and what every frame's `FrameContext
   /// .canvasSize` carries. Read-only from outside `Engine`; the only way to change it is
   /// `setResolution`, which also reallocates the accumulator (`FeedbackCore.resize`).
@@ -200,6 +204,7 @@ public final class Engine {
     // gates default off (spec §03 §7/§10); a disabled gate contributes exactly 0, not a
     // damped-toward-zero value — there's no partial bump.
     var params = router.tick(at: time)
+    params.warpFilter = warpFilter
     params.worldBump = bumpsEnabled.world ? audio.worldBump : 0
     // waveBump gates the same way, mirrored onto the audio snapshot itself (rather than a
     // local passed separately) because `waveforms.draw` below reads `audio.waveBumpRaw`

@@ -9,6 +9,7 @@ using namespace metal;
 struct WarpParams {
   float zoom; float theta; float2 offset; float2 anchor;
   float hueShift; float satDelta; float lightDelta;
+  uint nearest;   // 1 = nearest-texel read (parity: Sean's `fst @filter none`), 0 = bilinear
 };
 
 // GLSL mod(): x − y·floor(x/y). Mirrors ShaderMath/RotaFold.swift's glslMod.
@@ -71,9 +72,17 @@ kernel void fbx_warp_hsl(texture2d<float, access::sample> prev [[texture(0)]],
                           -centered.x * s + centered.y * c);
   float2 src = fold2(rotated / p.zoom + p.anchor * size + p.offset, size);
 
-  // fst is @filter linear (spec §01 §1) — sample linearly at the folded coordinate.
-  constexpr sampler smp(address::clamp_to_edge, filter::linear, coord::normalized);
-  float4 color = prev.sample(smp, src / size);
+  float4 color;
+  if (p.nearest != 0) {
+    // Nearest texel as an exact read, not a sampler: a shrunk 1-px line keeps its full
+    // value instead of being averaged with its neighbours (diagnosis doc, term 1). fold2
+    // already keeps `src` inside [0, size); the clamp is belt-and-braces.
+    uint2 texel = uint2(clamp(floor(src), float2(0.0), size - 1.0));
+    color = prev.read(texel);
+  } else {
+    constexpr sampler smp(address::clamp_to_edge, filter::linear, coord::normalized);
+    color = prev.sample(smp, src / size);
+  }
 
   float3 hsl = rgb2hsl(color.rgb) + float3(p.hueShift, p.satDelta, p.lightDelta);
   hsl.x = fract(hsl.x);

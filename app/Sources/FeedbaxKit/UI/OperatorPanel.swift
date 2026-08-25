@@ -119,6 +119,10 @@ public struct OperatorPanel: View {
               Text("\(rate) fps").tag(rate)
             }
           }
+          Picker("Feedback sampling", selection: Binding(get: { vm.warpFilter }, set: { vm.setWarpFilter($0) })) {
+            Text("Nearest (parity)").tag(WarpFilter.nearest)
+            Text("Linear").tag(WarpFilter.linear)
+          }
         }
 
         Section("Presets") {

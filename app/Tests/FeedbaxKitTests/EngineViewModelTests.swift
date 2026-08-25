@@ -99,4 +99,11 @@ final class EngineViewModelTests: XCTestCase {
     XCTAssertEqual(keyboard.poll(0)?.toggles, [.sInvert(false)],
                    "keyboard computes its next flip from live truth, not stale local memory")
   }
+
+  func testWarpFilterMirrorsSetter() {
+    let vm = EngineViewModel()
+    XCTAssertEqual(vm.warpFilter, .nearest)
+    vm.setWarpFilter(.linear)
+    XCTAssertEqual(vm.warpFilter, .linear)
+  }
 }

@@ -72,4 +72,13 @@ final class FeedbackCoreTests: XCTestCase {
     let px = ctx.readPixels(core.accumulator)
     XCTAssertEqual(px[0].x, 0, accuracy: 1.0 / 255)
   }
+
+  func testRenderParamsDefaultToNearestAndForwardTheFilter() {
+    var params = RenderParams(zoom: 1, theta: 0, offsetPx: .zero, hueShift: 0, satDelta: 0,
+                              lightDelta: 0, eraseAlpha: 1)
+    XCTAssertEqual(params.warpFilter, .nearest, "parity default (diagnosis doc, term 1)")
+    XCTAssertEqual(params.warpParams.nearest, 1)
+    params.warpFilter = .linear
+    XCTAssertEqual(params.warpParams.nearest, 0)
+  }
 }
