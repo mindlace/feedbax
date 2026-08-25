@@ -39,15 +39,7 @@ public final class AppBootstrap {
   /// recover from "the GPU context couldn't be built" or "the default bindings failed to
   /// decode," so callers are expected to print and exit, the way `feedbax-dev` always has.
   public static func start() throws -> AppBootstrap {
-    // Query the real input hardware's native sample rate BEFORE building `Engine` —
-    // `AudioBands`' biquads are tuned in Hz and only select the right band (spec §03 §3) if
-    // analysis runs at the rate samples actually arrive at. A throwaway `AVAudioEngine` is the
-    // standard way to ask CoreAudio "what's the default input's native format" without opening
-    // a persistent tap; `inputFormat` reports 0 when no input device is available (e.g. a
-    // CI/headless machine), so that falls back to the spec's 48 kHz target rather than building
-    // `AudioBands` at a nonsense rate.
-    let probeSampleRate = AVAudioEngine().inputNode.inputFormat(forBus: 0).sampleRate
-    let audioSampleRate: Float = probeSampleRate > 0 ? Float(probeSampleRate) : 48000
+    let audioSampleRate = probeInputSampleRate()
 
     let context = try MetalContext()
     let engine = try Engine(context: context, audioSampleRate: audioSampleRate,
@@ -99,6 +91,31 @@ public final class AppBootstrap {
     return AppBootstrap(
       engine: engine, keyboardSurface: keyboard, viewModel: viewModel, audioAnalysis: audioAnalysis
     )
+  }
+
+  /// Queries the real input hardware's native sample rate, which `start()` needs BEFORE building
+  /// `Engine` — `AudioBands`' biquads are tuned in Hz and only select the right band (spec §03
+  /// §3) if analysis runs at the rate samples actually arrive at. A short-lived `AVAudioEngine`
+  /// is the standard way to ask CoreAudio "what's the default input's native format" without
+  /// opening a persistent tap; `inputFormat` reports 0 when no input device is available (e.g. a
+  /// CI/headless machine), so that falls back to the spec's 48 kHz target rather than building
+  /// `AudioBands` at a nonsense rate.
+  ///
+  /// Internal rather than private so `AppBootstrapTests` can call it — the rest of `start()`
+  /// needs a GPU and a window server, but this probe is exactly the part that was crashing, and
+  /// it is testable on its own.
+  /// The engine MUST be bound to a local and explicitly kept alive across the `inputFormat`
+  /// call. Written as the obvious one-liner
+  /// (`AVAudioEngine().inputNode.inputFormat(forBus: 0)`) this segfaults on launch, every time:
+  /// ARC's last use of the engine is the `inputNode` getter, and `AVAudioInputNode` does NOT
+  /// retain the engine that vends it, so the engine is released while the returned node is
+  /// still in flight and `inputFormat(forBus:)` dereferences a freed `AVAudioIONodeImpl`.
+  /// `AudioAnalysis` never hit this because it holds its engine in a stored property.
+  static func probeInputSampleRate() -> Float {
+    let probeEngine = AVAudioEngine()
+    let probeSampleRate = probeEngine.inputNode.inputFormat(forBus: 0).sampleRate
+    withExtendedLifetime(probeEngine) {}
+    return probeSampleRate > 0 ? Float(probeSampleRate) : 48000
   }
 
   /// Resolves where the sticker folder actually lives for a REAL entry point (final review,
