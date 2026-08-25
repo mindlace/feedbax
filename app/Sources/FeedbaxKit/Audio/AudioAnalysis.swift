@@ -35,17 +35,16 @@ public struct FrameAudio {
 /// is fully unit-testable without a microphone — `ingest` takes plain sample arrays, and
 /// `AudioAnalysis` (below) is the only piece that actually touches `AVAudioEngine`.
 public final class AudioBands {
-  /// Checklist #15 (spec §03 §3, §12 q.8 — "the single highest-impact unresolved item in
-  /// this file for a port"): wave 2's input in the original is near-silent by default,
-  /// because its EQ's cold-inlet multiplier is signal-patched from a duplicate `gswitch`
-  /// whose default-selected candidate is itself unconnected. **Verified live against
-  /// `patches/Feedbax.maxpat` (Task 25, 2026-08-24):** with wave 2 enabled alone (wave 1
-  /// disabled) and DSP/mic running, (a) muting `adc~` entirely produced zero visible change
-  /// in wave 2's rendered shape, and (b) a loud transient (system chime played through the
-  /// speakers into the mic) produced no reactivity beyond ordinary render-loop jitter — both
-  /// consistent with a near-zero effective input multiplier. The 0.0 default is confirmed
-  /// correct, not a guess. Reviving wave 2 (a nonzero gain) is an operator tunable for a port,
-  /// not a parity requirement — the original's default *is* silent.
+  /// Checklist #15 (spec §03 §3, §12 q.8): wave 2's input in the original is near-silent by
+  /// default because its EQ's cold-inlet multiplier is signal-patched from a duplicate
+  /// `gswitch` whose default-selected candidate is itself unconnected. **Verified:** primary
+  /// basis is the static wiring trace (spec §03 §3, the dead-gswitch cold-inlet path).
+  /// Corroborated by live behavioral test (Task 25, 2026-08-24): with wave 2 enabled alone
+  /// and DSP/mic running, muting `adc~` entirely and playing a loud transient (`Glass.aiff`)
+  /// produced no waveform-2 change beyond measured render jitter (cyan-pixel IoU 0.777 vs
+  /// quiet-baseline 0.754, visually indistinguishable). Test had no independent positive
+  /// control on the session's audio path. The 0.0 default is confirmed. Reviving wave 2
+  /// (nonzero gain) is an operator tunable, not a parity requirement.
   public var wave2InputGain: Float = 0.0
 
   /// Guards every stored property below. `AudioAnalysis.handle(_:)` calls `ingest` from the
@@ -84,7 +83,7 @@ public final class AudioBands {
 
   private static let framesize = 1024      // jit.catch~ @framesize (spec §03 §4), both chains
   private static let wave1Downsample = 2   // jit.catch~[3] @downsample (spec §03 §4)
-  private static let wave2Downsample = 512 // jit.catch~[214] @downsample (spec §03 §4, [?])
+  private static let wave2Downsample = 512 // jit.catch~[214] @downsample (spec §03 §4, verified Task 25)
 
   public init(sampleRate: Float) {
     // Bands/freq/Q/gain verbatim from spec §03 §3's parity table.
