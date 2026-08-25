@@ -1,8 +1,10 @@
 # Dynamism gap — root-cause map (2026-08-24, evening)
 
 **Branch:** `worktree-reimplementation-proposal` at `3ae9ba2` (whiteout fixes in)
-**Status:** diagnosis complete; two loop-body terms identified and reproduced in the port's
-own headless engine; fixes not yet applied; two Max-side measurements still owed.
+**Status:** fixes applied per `docs/superpowers/plans/2026-08-24-dynamism-gap-fixes.md`
+(nearest resample, unclamped HSL, waveform geometry, wave-2 input, HUD mic status, fader
+readouts). Still owed: the three Max-side measurements below, and a like-for-like visual
+check of the dev build against the two screenshots at the measured vector.
 
 ## Reports
 

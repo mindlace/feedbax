@@ -5,6 +5,17 @@
 
 # Render loop, feedback core, and shader chain
 
+> **Corrections (2026-08-24, evening; evidence in
+> `docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md`):**
+> * §5 "saturation and lightness … would clip/desaturate at the extremes": **not so.**
+>   Jitter's reference `cc.hsl2rgb.jxs` converts the raw S/L (`v2 = L·(1+S)`); the char
+>   texture clips each RGB channel afterwards. Above S = 1 that pair is a multiplicative gain
+>   of (1 + δ/2) per frame on the max channel — the SATURATION fader's real effect.
+> * §1/§4: the loop's resample filter is a first-order term of the look. Sean's `fst` was
+>   `@filter none` (nearest); a bilinear loop forgets a 12-px seed in ~15 generations, a
+>   nearest loop keeps it ~250. The retrofit node's capture-texture filter is still to be
+>   read off the running patch.
+
 Scope: `patches/Feedbax.maxpat` (main patch, top-level `/`) and `patches/feedbax.shaderfx.maxpat` (subpatch `p shaderfx`, instantiated as `feedbax.shaderfx` [obj-148] in the main patch). All object ids below are from the main patch unless prefixed `sfx:` (shaderfx patch) or `v122:` (the retired chain, from the listing of archived `v122debuggingisg`, `//shaderfx#obj-148`).
 
 ## 0. Terms used below
