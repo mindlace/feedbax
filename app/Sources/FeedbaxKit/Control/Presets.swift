@@ -64,18 +64,19 @@ extension Preset: Codable {
 /// Snapshot of every discrete, persistent `ToggleEvent` state. `.fullscreen`/`.stillCapture`
 /// aren't represented — those are one-shot UI actions (spec §04 §1's toggle table), not
 /// states a preset could meaningfully restore. Defaults mirror `ToggleEvent`'s own observed
-/// rest state (spec §01 §4): everything off except `wave1`, which is on at load.
+/// rest state (spec §01 §4): everything off except `wave1` and `wave2`, which both draw at
+/// load (wave 2's box is unchecked but never sends enable 0 — diagnosis doc).
 public struct PresetToggles: Codable, Equatable {
   public var sInvert = false
   public var worldBump = false
   public var waveBump = false
   public var kittyBump = false
   public var wave1 = true
-  public var wave2 = false
+  public var wave2 = true
   public var layerEnabled = false
 
   public init(sInvert: Bool = false, worldBump: Bool = false, waveBump: Bool = false,
-              kittyBump: Bool = false, wave1: Bool = true, wave2: Bool = false,
+              kittyBump: Bool = false, wave1: Bool = true, wave2: Bool = true,
               layerEnabled: Bool = false) {
     self.sInvert = sInvert
     self.worldBump = worldBump

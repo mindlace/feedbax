@@ -93,7 +93,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   @Published public private(set) var sInvertOn = false
   @Published public private(set) var layerOn = false
   @Published public private(set) var wave1On = true    // PresetToggles' own default (Presets.swift)
-  @Published public private(set) var wave2On = false
+  @Published public private(set) var wave2On = true
   @Published public private(set) var worldBumpOn = false
   @Published public private(set) var waveBumpOn = false
   @Published public private(set) var kittyBumpOn = false

@@ -3,58 +3,85 @@ import simd
 @testable import FeedbaxKit
 
 final class WaveformTests: XCTestCase {
-  func testWave1IsClosedLoopAtRadiusOneWhenSilent() {
-    let pts = WaveformRenderer.wave1Polyline([Float](repeating: 0, count: 512), style: .wave1)
-    XCTAssertEqual(pts.count, 513, "closed: first point repeated")
-    XCTAssertEqual(pts.first!, pts.last!)
-    // radius 1 scaled by (1.5, 1) around (0, −0.85): rightmost point at x = 1.5, y = −0.85
-    XCTAssertEqual(pts[0].x, 1.5, accuracy: 1e-4)
-    XCTAssertEqual(pts[0].y, -0.85, accuracy: 1e-4)
+  // MARK: wave 1 — `jit.gl.graph` obj-12, linear, `scale 1.5 1 0`, `position 0 −0.85 0`
+
+  func testWave1IsAStraightLineAtTheBottomWhenSilent() {
+    let pts = WaveformRenderer.wave1LinePoints([Float](repeating: 0, count: 512), style: .wave1)
+    XCTAssertEqual(pts.count, 512)
+    XCTAssertEqual(pts.first!.x, -1.5, accuracy: 1e-4, "spans −scale.x…+scale.x")
+    XCTAssertEqual(pts.last!.x, 1.5, accuracy: 1e-4)
+    for p in pts { XCTAssertEqual(p.y, -0.85, accuracy: 1e-5, "silent line sits at position.y") }
   }
-  func testWave1AmplitudeModulatesRadius() {
-    var samples = [Float](repeating: 0, count: 512); samples[0] = 0.5
-    let pts = WaveformRenderer.wave1Polyline(samples, style: .wave1)
-    XCTAssertEqual(pts[0].x, 2.25, accuracy: 1e-4, "(1 + 0.5)·1.5")
-  }
-  func testWave2PointsSpanWidth() {
-    let pts = WaveformRenderer.wave2Points([0.2, -0.2], style: .wave2)
-    XCTAssertEqual(pts.count, 2)
-    XCTAssertEqual(pts[0].x, -1, accuracy: 1e-4); XCTAssertEqual(pts[1].x, 1, accuracy: 1e-4)
-    XCTAssertEqual(pts[0].y, 0.2, accuracy: 1e-4)
-  }
-  func testParityStyleConstants() {
-    XCTAssertEqual(WaveformStyle.wave1.color, SIMD4(0.392375, 0.23808, 0, 0.8))
-    let c2 = WaveformStyle.wave2.color
-    XCTAssertEqual(SIMD3(c2.x, c2.y, c2.z), SIMD3(0, 0.786722, 0.821229))
-    XCTAssertEqual(WaveformStyle.wave1.lineWidthPx, 12)
-  }
-  /// Pins the pixel→NDC half-size arithmetic directly (caught a prior authoring slip that
-  /// divided by an extra factor of 2, shrinking wave 2's sprites to ~4px instead of the
-  /// documented 8px — the GPU smoke test below didn't catch it because it only checks that
-  /// *a* pixel lands on the expected color, not the sprite's actual extent).
-  func testPointSpriteHalfSizeNDCConversion() {
-    let halfSize = WaveformRenderer.pointSpriteHalfSizeNDC(pointSizePx: 8, canvasHeight: 1080)
-    XCTAssertEqual(halfSize, 8.0 / 1080.0, accuracy: 1e-6)
+  func testWave1SampleDeflectsYOneToOne() {
+    var samples = [Float](repeating: 0, count: 512); samples[10] = 0.05
+    let pts = WaveformRenderer.wave1LinePoints(samples, style: .wave1)
+    XCTAssertEqual(pts[10].y, -0.80, accuracy: 1e-5, "y = position.y + sample·scale.y")
+    XCTAssertEqual(pts[11].y, -0.85, accuracy: 1e-5)
   }
 
-  /// GPU smoke test — not in the brief's pinned set, added because the ribbon/point-sprite
-  /// shaders (Composite.metal's `fbx_ribbon_v`/`fbx_point_v`/`fbx_point_f`) have no other
-  /// coverage: the pinned tests above only exercise the pure CPU geometry. Draws both
-  /// waveforms into a small render target and checks *something* landed (nonzero alpha
-  /// somewhere) — a loose bound since exact pixel coverage depends on the perspective
-  /// projection, but enough to catch a pipeline/shader-compile regression or a completely
-  /// off-screen/degenerate draw.
+  // MARK: wave 2 — obj-213, `radial 1`, `radialradius 0.7`, `position 0 0 −2`
+
+  func testWave2IsAClosedRingOfRadius0Point7StretchedByAspect() {
+    let aspect: Float = 16.0 / 9.0
+    let pts = WaveformRenderer.wave2RingPolyline([Float](repeating: 0, count: 1024), style: .wave2,
+                                                 canvasAspect: aspect)
+    XCTAssertEqual(pts.count, 1025, "closed: first point repeated")
+    XCTAssertEqual(pts.first!, pts.last!)
+    XCTAssertEqual(pts[0].x, 0.7 * aspect, accuracy: 1e-4, "x radius × canvas aspect (screenshot ellipse)")
+    XCTAssertEqual(pts[0].y, 0, accuracy: 1e-4)
+    XCTAssertEqual(pts[256].x, 0, accuracy: 1e-3)
+    XCTAssertEqual(pts[256].y, 0.7, accuracy: 1e-4, "y radius is radialradius itself")
+  }
+  func testWave2SampleModulatesRadius() {
+    var samples = [Float](repeating: 0, count: 1024); samples[0] = 0.1
+    let pts = WaveformRenderer.wave2RingPolyline(samples, style: .wave2, canvasAspect: 1)
+    XCTAssertEqual(pts[0].x, 0.8, accuracy: 1e-4, "r = radialradius + sample")
+  }
+
+  // MARK: ribbon expansion shared by both
+
+  func testRibbonVertexCountsAndOffsets() {
+    let open: [SIMD2<Float>] = [SIMD2(0, 0), SIMD2(1, 0), SIMD2(2, 0)]
+    let openVerts = WaveformRenderer.ribbonVertices(open, closed: false, halfWidthNDC: 0.01)
+    XCTAssertEqual(openVerts.count, 6, "two vertices per point")
+    XCTAssertEqual(openVerts[0].halfWidthNDC, 0.01); XCTAssertEqual(openVerts[1].halfWidthNDC, -0.01)
+    XCTAssertEqual(openVerts[0].normal.y, 1, accuracy: 1e-5, "normal of a +x line is +y")
+    let ring = WaveformRenderer.wave2RingPolyline([Float](repeating: 0, count: 8), style: .wave2, canvasAspect: 1)
+    let ringVerts = WaveformRenderer.ribbonVertices(ring, closed: true, halfWidthNDC: 0.01)
+    XCTAssertEqual(ringVerts.count, ring.count * 2)
+    XCTAssertEqual(ringVerts[0].normal, ringVerts[ringVerts.count - 2].normal, "seam tangents agree")
+  }
+
+  func testParityStyleConstants() {
+    XCTAssertEqual(WaveformStyle.wave1.color, SIMD4(0.392375, 0.23808, 0, 0.8))
+    XCTAssertEqual(WaveformStyle.wave1.lineWidthPx, 12)
+    XCTAssertEqual(WaveformStyle.wave1.radialRadius, 0, "wave 1 is linear")
+    XCTAssertEqual(WaveformStyle.wave1.position, SIMD3(0, -0.85, 0))
+    let c2 = WaveformStyle.wave2.color
+    XCTAssertEqual(SIMD3(c2.x, c2.y, c2.z), SIMD3(0, 0.786722, 0.821229))
+    XCTAssertEqual(WaveformStyle.wave2.lineWidthPx, 4)
+    XCTAssertEqual(WaveformStyle.wave2.radialRadius, 0.7)
+    XCTAssertEqual(WaveformStyle.wave2.position, SIMD3(0, 0, -2))
+  }
+
+  func testDefaultsMatchTheLoadedPatch() throws {
+    let ctx = try MetalContext()
+    let renderer = try WaveformRenderer(context: ctx, pixelFormat: .rgba8Unorm)
+    XCTAssertTrue(renderer.wave1Enabled, "Bass toggle: loadmess 1")
+    XCTAssertTrue(renderer.wave2Enabled, "Circle toggle never sends enable 0; jit.gl.graph enables by default")
+    XCTAssertEqual(renderer.wave2BaseAlpha, 0.8, "loadmess 0.8 → slider[338] → alpha")
+  }
+
+  /// GPU smoke test — the ribbon shader has no other coverage. Wave 1's silent line sits
+  /// just below the visible edge at z = 0 (0.85 > 0.828), so it is fed a +0.2 deflection to
+  /// bring it into frame; wave 2's ring (radius 0.7 at z = −2) is visible on its own.
   func testDrawProducesVisiblePixels() throws {
     let ctx = try MetalContext()
-    // Pipelines must match their render target's format (WaveformRenderer.init's doc
-    // comment) — pass the same format the test's own target texture uses below, not a
-    // hardcoded guess, exactly as a real caller (Compositor, drawing into FeedbackCore's
-    // accumulator) must.
     let targetFormat: MTLPixelFormat = .rgba16Float
     let renderer = try WaveformRenderer(context: ctx, pixelFormat: targetFormat)
     renderer.wave1Enabled = true
     renderer.wave2Enabled = true
-    renderer.wave2BaseAlpha = 0.5
+    renderer.wave2BaseAlpha = 0.8
 
     let size = 64
     let target = ctx.device.makeTexture(descriptor: {
@@ -74,10 +101,9 @@ final class WaveformTests: XCTestCase {
     rp.colorAttachments[0].storeAction = .store
     let enc = cb.makeRenderCommandEncoder(descriptor: rp)!
 
-    var wave1Points = [Float](repeating: 0, count: 512)
-    wave1Points[0] = 0.2
     let audio = FrameAudio(worldBump: 0, waveBumpRaw: 0.1, kittyBumpRaw: 0,
-                           wave1Points: wave1Points, wave2Points: [0.2, -0.2])
+                           wave1Points: [Float](repeating: 0.2, count: 512),
+                           wave2Points: [Float](repeating: 0, count: 1024))
     let proj = Compositor.projection(canvasAspect: 1)
     renderer.draw(enc, frame: frame, audio: audio, projection: proj)
     enc.endEncoding()
@@ -85,23 +111,14 @@ final class WaveformTests: XCTestCase {
 
     let pixels = ctx.readPixels(target)
     XCTAssertTrue(pixels.contains { $0.w > 0 }, "expected at least one drawn (non-transparent) pixel")
-
-    // Color check, not just "something is opaque": guards against a Swift/Metal struct
-    // layout mismatch between RibbonVertex/PointVertex/WaveUniforms and their
-    // Composite.metal twins, which could still satisfy the loose alpha check above with
-    // garbled (but nonzero) colors. Composited onto transparent black, alphaOver's dst
-    // factor is (1−srcA) and srcAlphaDstAlpha's is dstA — both zero on first write — so
-    // each waveform's first-touched pixel is exactly `color.rgb * srcAlpha`.
+    // First-touched pixels over transparent black are exactly color.rgb · srcAlpha for both
+    // blend modes (alphaOver's dst factor is 1−srcA, srcAlphaDstAlpha's is dstA = 0).
     func hasPixel(near expected: SIMD3<Float>, tol: Float) -> Bool {
-      pixels.contains { simd_length($0.xyz - expected) < tol }
+      pixels.contains { simd_length(SIMD3($0.x, $0.y, $0.z) - expected) < tol }
     }
-    let wave1Expected = SIMD3<Float>(0.392375, 0.23808, 0) * Float(0.8)  // srcAlpha 0.8 (style.color.w)
-    let wave2Expected = SIMD3<Float>(0, 0.786722, 0.821229) * Float(0.6)  // 0.5 base + 0.1 waveBumpRaw
-    XCTAssertTrue(hasPixel(near: wave1Expected, tol: 0.02), "expected wave 1's burnt-orange ribbon color")
-    XCTAssertTrue(hasPixel(near: wave2Expected, tol: 0.02), "expected wave 2's cyan sprite color")
+    let wave1Expected = SIMD3<Float>(0.392375, 0.23808, 0) * Float(0.8)
+    let wave2Expected = SIMD3<Float>(0, 0.786722, 0.821229) * Float(0.9)   // 0.8 base + 0.1 waveBumpRaw
+    XCTAssertTrue(hasPixel(near: wave1Expected, tol: 0.02), "expected wave 1's burnt-orange line")
+    XCTAssertTrue(hasPixel(near: wave2Expected, tol: 0.02), "expected wave 2's cyan ring")
   }
-}
-
-private extension SIMD4 where Scalar == Float {
-  var xyz: SIMD3<Float> { SIMD3(x, y, z) }
 }

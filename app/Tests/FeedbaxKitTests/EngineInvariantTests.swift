@@ -109,78 +109,82 @@ final class EngineInvariantTests: XCTestCase {
     return stats
   }
 
-  // MARK: - 1. No frame ever clips
+  // MARK: - 1. No frame ever whites out
 
-  /// **Guards: the whiteout itself.** This is the precise property all three bugs violated —
-  /// under the old `maxScale`/`startupVector`/ramp seeds the accumulator integrated to
-  /// r=g=b=255 across the whole canvas within ~90 frames (and frames 3–6 were 100 % white
-  /// from the ramp overshoot alone). Any pixel reaching full white means the loop has run
-  /// out of headroom: information is being destroyed, not rendered.
+  /// **Guards: the whiteout itself.** Under the old `maxScale`/`startupVector`/ramp seeds
+  /// the accumulator integrated to r=g=b=255 across the WHOLE canvas within ~90 frames, and
+  /// frames 3–6 were 100 % white from the ramp overshoot alone. That is the property this
+  /// test pins: the frame as a whole never runs out of headroom.
   ///
-  /// Thresholds: `whiteFraction` must be *exactly* zero — one saturated pixel is one too
-  /// many, and there is no defensible non-zero budget for "how much of the frame may be
-  /// destroyed." `maxLum` must sit at least one 8-bit quantization step (1/255) below 1.0,
-  /// so a frame that clips by a hair still fails rather than squeaking through on rounding.
-  /// Measured headroom on the fixed loop: peak `maxLum` 0.9278, about 18 steps clear.
-  func testNoFrameEverClipsToWhite() throws {
+  /// This used to assert that no single pixel ever clips. That per-pixel property is not a
+  /// property of the instrument (written argument, per this file's header): the parity seed
+  /// set draws wave 2's ring at load, centred, and under the startup zoom (0.7) every
+  /// generation of that ring lands closer to the centre than the last, so the centre pixels
+  /// receive every surviving generation additively and saturate — Max's render window shows
+  /// the same white convergence point and 4.5 % clipped pixels at the owner's settings
+  /// (docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md; the whiteout write-up's
+  /// own reframing: clipping is the instrument's bounded nonlinearity, and "never clips
+  /// while a seed is permanently drawn" is deliberately not asserted). Measured on the parity
+  /// loop: 0.09 % of pixels clipped by frame 575, none before frame 574.
+  ///
+  /// Threshold: `whiteFraction` below 1 % on every frame. The bug's signature is 100 %; a
+  /// convergence point on a 192×108 canvas is a few dozen pixels (< 0.3 %). Not fitted —
+  /// two orders of magnitude separate the two.
+  func testNoFrameEverWhitesOut() throws {
     let run = Self.startupRun
     for (i, s) in run.enumerated() {
-      XCTAssertEqual(s.whiteFraction, 0,
+      XCTAssertLessThan(s.whiteFraction, 0.01,
         "frame \(i): \(String(format: "%.4f%%", s.whiteFraction * 100)) of pixels are fully " +
-        "saturated white. The feedback loop is clipping — it is gaining energy every frame " +
+        "saturated white. The feedback loop is running out of headroom across the frame " +
         "(this is the launch whiteout). mean=\(s.mean), maxLum=\(s.maxLum)")
-      XCTAssertLessThanOrEqual(s.maxLum, 1.0 - 1.0 / 255,
-        "frame \(i): brightest pixel luminance \(s.maxLum) has less than one 8-bit step of " +
-        "headroom below full white. mean=\(s.mean)")
     }
   }
 
-  // MARK: - 2. Converges to a fixed point
+  // MARK: - 2. Bounded, not integrating
 
-  /// **Guards: an integrator that never settles.** A correct loop is a contraction — the
-  /// negative `bias` lightness delta pulls the image down as fast as the feedback plane
-  /// pushes it up, so mean luminance reaches an equilibrium and stops moving. Under the
-  /// bug it climbed monotonically until it hit the clip ceiling; a *clamped* runaway can
-  /// even look "stable" at the top, which is why this test pairs convergence with the
-  /// no-clip test above and the open-interval bound below.
+  /// **Guards: an integrator that never settles.** Under the bug the mean climbed
+  /// monotonically at ~0.01 per frame until it hit the clip ceiling. A correct loop's mean
+  /// stays bounded: the negative `bias` lightness delta retires every generation of content
+  /// after ~66 frames at the startup vector, so nothing can integrate without limit.
   ///
-  /// This asserts convergence, **not** a value. The equilibrium legitimately depends on
-  /// what content is in the loop (sticker folder, movie, audio); hardcoding the ~0.7724
-  /// this run happens to reach would just be a golden number wearing a different hat.
+  /// This used to assert frame-to-frame stationarity below 1e-5 from the halfway point —
+  /// measured under bilinear resampling, which blurred every generation away within ~15
+  /// frames and left a dead-still fixed point by frame 240. The parity loop reads the
+  /// nearest texel (diagnosis doc, term 1): generations survive until the lightness term
+  /// retires them, each lands on a slightly different pixel set as it rotates, and the mean
+  /// keeps creeping (measured +4.7e-5 per frame over frames 300–600) while the content keeps
+  /// evolving — which the original does too ("takes much longer to settle" is one of the
+  /// owner's reports). Stationarity to 1e-5 is therefore not a property of the instrument;
+  /// boundedness is (written argument, per this file's header).
   ///
-  /// Thresholds: the frame-to-frame delta must be below 1e-5 by the run's halfway point and
-  /// stay there. 1e-5 is ~1/400th of one 8-bit quantization step (1/255 ≈ 0.0039), so it is
-  /// "no longer moving at a rate the accumulator can even represent," not a fitted number.
-  /// Measured: the run is at 1e-6 by frame 210 and bit-exactly stationary (delta 0.0) from
-  /// frame ~240 on, so the margin is the whole distance to zero.
-  func testMeanLuminanceConvergesToAFixedPoint() throws {
+  /// Threshold: the mean over the last 100 frames may exceed the mean over frames 300–400 by
+  /// at most 0.05. The bug moves 0.05 in five frames; the parity loop's measured drift moves
+  /// it ~0.01 over that span. Not fitted — an order of magnitude each way.
+  func testMeanLuminanceIsBoundedNotIntegrating() throws {
     let run = Self.startupRun
-    let settleBy = Self.frameCount / 2
-    let epsilon = 1e-5
-
-    for i in settleBy..<run.count {
-      let delta = abs(run[i].mean - run[i - 1].mean)
-      XCTAssertLessThan(delta, epsilon,
-        "frame \(i): mean luminance is still moving by \(delta) per frame after \(settleBy) " +
-        "frames (limit \(epsilon)). The loop has not converged — it is drifting toward one " +
-        "of its rails. mean=\(run[i].mean), previous=\(run[i - 1].mean)")
+    func windowMean(_ range: Range<Int>) -> Double {
+      range.reduce(0.0) { $0 + run[$1].mean } / Double(range.count)
     }
+    let early = windowMean(300..<400)
+    let late = windowMean((run.count - 100)..<run.count)
+    XCTAssertLessThan(late - early, 0.05,
+      "mean luminance rose from \(early) (frames 300–400) to \(late) (last 100 frames) — the " +
+      "loop is integrating toward the white rail rather than holding a bounded steady state")
 
     // A degenerate collapse (all black) or a saturated rail (all white) is also perfectly
-    // "converged", so pin the equilibrium into a plausible open interval. The bounds are
-    // deliberately loose — they only exclude the two rails, they do not encode this run's
-    // particular content.
+    // "bounded", so pin the steady state into a plausible open interval. The bounds are
+    // deliberately loose — they only exclude the two rails.
     let equilibrium = run[run.count - 1].mean
     XCTAssertGreaterThan(equilibrium, 0.02,
-      "converged to mean luminance \(equilibrium) — the loop has collapsed to (near) black")
+      "settled at mean luminance \(equilibrium) — the loop has collapsed to (near) black")
     XCTAssertLessThan(equilibrium, 0.98,
-      "converged to mean luminance \(equilibrium) — the loop has pinned at (near) white")
+      "settled at mean luminance \(equilibrium) — the loop has pinned at (near) white")
   }
 
   // MARK: - 3. Bounded
 
   /// **Guards: both rails, on every frame — including the transient.** Invariant 2 only
-  /// looks at the settled tail; bug 3's 6-frame all-white overshoot happened at frames 3–6
+  /// compares two late windows; bug 3's 6-frame all-white overshoot happened at frames 3–6
   /// and was gone by frame 10, so a tail-only test sails straight past it. This one checks
   /// every single frame from the very first.
   ///
