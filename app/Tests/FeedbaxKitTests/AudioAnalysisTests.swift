@@ -61,8 +61,29 @@ final class AudioAnalysisTests: XCTestCase {
     bands.ingest(sine(46.7, seconds: 0.1, sampleRate: 48000, amplitude: 0.5))
     let f = bands.frameValues()
     XCTAssertEqual(f.wave1Points.count, 512, "framesize 1024 / downsample 2")
-    XCTAssertEqual(f.wave2Points.count, 2, "downsample 512 — verified against the running patch (Task 25): wave 2 stayed static/non-reactive under a full-mic-mute and loud-transient A/B test, consistent with a coarse 2-point decimation rather than a dense line")
-    XCTAssertEqual(f.wave2Points[0], 0, accuracy: 1e-5, "wave2 input silent by default (checklist #15) — confirmed live in Feedbax.maxpat: muting adc~ entirely produced zero visible change in wave 2's rendered shape, and a loud transient produced no reactivity beyond baseline render jitter")
+    XCTAssertEqual(f.wave2Points.count, 1024, "framesize 1024 cells of 512-sample group means (jit.catch~ refpage: downsample n averages each group of n)")
+  }
+  /// Wave 2's multiplier is `*~ -0.5` whose cold inlet is fed by a `gswitch` — a MESSAGE
+  /// object (its refpage inlets are bang/int), so the −0.5 argument stays in force; the spec's
+  /// "signal-patched cold inlet → silent" reading was wrong (diagnosis doc, "Audio couplings").
+  func testWave2IsFedAtMinusHalfGain() {
+    XCTAssertEqual(AudioBands(sampleRate: 48000).wave2InputGain, -0.5)
+    let bands = AudioBands(sampleRate: 48000)
+    bands.ingest(sine(60, seconds: 1.0, sampleRate: 48000, amplitude: 0.8))
+    let points = bands.frameValues().wave2Points
+    XCTAssertGreaterThan(points.map { abs($0) }.max()!, 0.001, "the ring is not structurally silent")
+    let silent = AudioBands(sampleRate: 48000)
+    silent.ingest([Float](repeating: 0, count: 48000))
+    XCTAssertTrue(silent.frameValues().wave2Points.allSatisfy { $0 == 0 })
+  }
+  func testAveragingWaveBufferEmitsOneMeanPerGroup() {
+    var buf = AveragingWaveBuffer(capacity: 4, group: 3)
+    for _ in 0..<3 { buf.push(1) }
+    XCTAssertEqual(buf.points(), [0, 0, 0, 1], "one full group → one cell, zero-padded before it")
+    buf.push(2); buf.push(4)
+    XCTAssertEqual(buf.points(), [0, 0, 0, 1], "a partial group emits nothing yet")
+    buf.push(6)
+    XCTAssertEqual(buf.points(), [0, 0, 1, 4], "mean of (2, 4, 6)")
   }
   func testKittyReceiverRectifiesAndSlews() {
     let r = KittyBumpReceiver()

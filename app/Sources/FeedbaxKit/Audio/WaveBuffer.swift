@@ -26,7 +26,7 @@ struct WaveBuffer {
 
   /// Oldest→newest snapshot, zero-padded at the front if fewer than `capacity` samples have
   /// ever been pushed (mirrors a freshly-loaded `jit.catch~`'s all-zero matrix).
-  private func chronological() -> [Float] {
+  func snapshot() -> [Float] {
     guard filled == capacity else {
       return [Float](repeating: 0, count: capacity - filled) + Array(storage[0..<filled])
     }
@@ -40,8 +40,39 @@ struct WaveBuffer {
   /// loud-transient A/B test, consistent with this coarse decimation rather than a dense
   /// audio-reactive line — left as-is, no contradicting observation.
   func strideDecimated(by stride: Int) -> [Float] {
-    let full = chronological()
+    let full = snapshot()
     guard stride > 0 else { return full }
     return Swift.stride(from: 0, to: full.count, by: stride).map { full[$0] }
   }
+}
+
+/// `jit.catch~ @downsample n` as its refpage defines it — "each group of n successive samples
+/// are averaged" — followed by a `capacity`-cell frame of those means, oldest→newest. This is
+/// wave 2's path (`loadmess 512 → downsample 512 → s wave2cmd`, `framesize 1024`): a 1024-cell
+/// ring of 512-sample means, which is why the ring stays near-circular under a 60 Hz band
+/// (diagnosis doc, "Audio couplings"; the exact history depth is flagged [measure] there).
+struct AveragingWaveBuffer {
+  private var ring: WaveBuffer
+  private let group: Int
+  private var sum: Float = 0
+  private var count = 0
+
+  init(capacity: Int, group: Int) {
+    precondition(group > 0)
+    ring = WaveBuffer(capacity: capacity)
+    self.group = group
+  }
+
+  mutating func push(_ x: Float) {
+    sum += x
+    count += 1
+    if count == group {
+      ring.push(sum / Float(group))
+      sum = 0
+      count = 0
+    }
+  }
+
+  /// Oldest→newest cells, zero-padded at the front until `capacity` groups have completed.
+  func points() -> [Float] { ring.snapshot() }
 }

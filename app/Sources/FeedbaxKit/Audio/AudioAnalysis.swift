@@ -22,12 +22,10 @@ public struct FrameAudio {
   /// persistent `SlideEnvelope(up: 8, down: 3)` cell — `jit.slide`'s per-cell smoothing
   /// (spec §03 §4).
   public var wave1Points: [Float]
-  /// Wave-2 ring (1024 samples) downsampled ×512 → 2 points, unsmoothed (spec §03 §4 — wave
-  /// 2's matrix reaches its graph "unsmoothed"). Anomalously coarse relative to wave 1's ×2 —
-  /// verified against the running patch (Task 25): with wave 2 enabled alone and no other
-  /// change, muting the mic entirely and playing a loud transient both left the rendered
-  /// shape unchanged, consistent with the coarse-decimation/near-silent-input reading rather
-  /// than a dense audio-reactive line.
+  /// Wave-2 ring: 1024 cells, each the mean of 512 consecutive samples of the 60 Hz band
+  /// (`jit.catch~ @framesize 1024`, `downsample 512` = group averaging per its refpage),
+  /// unsmoothed. Averaging over ~0.6 of a 60 Hz cycle leaves little, which is why the
+  /// original's ring is near-static (diagnosis doc, "Audio couplings").
   public var wave2Points: [Float]
 }
 
@@ -35,17 +33,12 @@ public struct FrameAudio {
 /// is fully unit-testable without a microphone — `ingest` takes plain sample arrays, and
 /// `AudioAnalysis` (below) is the only piece that actually touches `AVAudioEngine`.
 public final class AudioBands {
-  /// Checklist #15 (spec §03 §3, §12 q.8): wave 2's input in the original is near-silent by
-  /// default because its EQ's cold-inlet multiplier is signal-patched from a duplicate
-  /// `gswitch` whose default-selected candidate is itself unconnected. **Verified:** primary
-  /// basis is the static wiring trace (spec §03 §3, the dead-gswitch cold-inlet path).
-  /// Corroborated by live behavioral test (Task 25, 2026-08-24): with wave 2 enabled alone
-  /// and DSP/mic running, muting `adc~` entirely and playing a loud transient (`Glass.aiff`)
-  /// produced no waveform-2 change beyond measured render jitter (cyan-pixel IoU 0.777 vs
-  /// quiet-baseline 0.754, visually indistinguishable). Test had no independent positive
-  /// control on the session's audio path. The 0.0 default is confirmed. Reviving wave 2
-  /// (nonzero gain) is an operator tunable, not a parity requirement.
-  public var wave2InputGain: Float = 0.0
+  /// `*~ -0.5` [sound2 obj-128] on wave 2's input. Its cold inlet is wired from a `gswitch`,
+  /// which is a MESSAGE object (refpage inlets `bang/int`), so the typed −0.5 stays in force —
+  /// the earlier "signal-patched cold inlet → silent" reading was wrong, and the live test
+  /// that seemed to confirm it fed a glass transient through a 60 Hz band-pass with no
+  /// positive control (diagnosis doc, "Audio couplings"). Operator-tunable.
+  public var wave2InputGain: Float = -0.5
 
   /// Guards every stored property below. `AudioAnalysis.handle(_:)` calls `ingest` from the
   /// realtime audio-input-tap thread (`AVAudioEngine` installs the tap callback on its own
@@ -76,14 +69,14 @@ public final class AudioBands {
   private var kittyBumpCount: Int = 0
 
   private var wave1Ring: WaveBuffer
-  private var wave2Ring: WaveBuffer
+  private var wave2Ring: AveragingWaveBuffer
   // One persistent SlideEnvelope per decimated wave-1 point — `jit.slide`'s per-cell
   // smoothing carries state across frames independently for each point index (spec §03 §4).
   private var wave1PointSliders: [SlideEnvelope]
 
   private static let framesize = 1024      // jit.catch~ @framesize (spec §03 §4), both chains
   private static let wave1Downsample = 2   // jit.catch~[3] @downsample (spec §03 §4)
-  private static let wave2Downsample = 512 // jit.catch~[214] @downsample (spec §03 §4, verified Task 25)
+  private static let wave2Group = 512   // jit.catch~[214] downsample 512 (loadmess 512 → s wave2cmd)
 
   public init(sampleRate: Float) {
     // Bands/freq/Q/gain verbatim from spec §03 §3's parity table.
@@ -95,7 +88,7 @@ public final class AudioBands {
     worldBumpRunningAverage = RunningAverage(window: 100, mode: .absolute)
 
     wave1Ring = WaveBuffer(capacity: Self.framesize)
-    wave2Ring = WaveBuffer(capacity: Self.framesize)
+    wave2Ring = AveragingWaveBuffer(capacity: Self.framesize, group: Self.wave2Group)
     let wave1PointCount = Self.framesize / Self.wave1Downsample
     wave1PointSliders = (0..<wave1PointCount).map { _ in SlideEnvelope(up: 8, down: 3) }
   }
@@ -151,7 +144,7 @@ public final class AudioBands {
     for i in 0..<wave1Raw.count {
       wave1Points[i] = wave1PointSliders[i].process(wave1Raw[i])
     }
-    let wave2Points = wave2Ring.strideDecimated(by: Self.wave2Downsample)
+    let wave2Points = wave2Ring.points()
 
     return FrameAudio(worldBump: worldBump, waveBumpRaw: waveBumpRaw, kittyBumpRaw: kittyBumpRaw,
                        wave1Points: wave1Points, wave2Points: wave2Points)
