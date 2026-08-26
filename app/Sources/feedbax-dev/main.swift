@@ -222,6 +222,16 @@ do {
   exit(1)
 }
 
+// TEMPORARY (Task 3): `AppBootstrap.host` doesn't exist yet — Task 5 moves this into
+// `AppBootstrap` and deletes this local build.
+let host: EngineHost = {
+  do { return try EngineHost(engine: bootstrap.engine) } catch {
+    FileHandle.standardError.write(Data("Feedbax: failed to start the renderer: \(error)\n".utf8))
+    exit(1)
+  }
+}()
+host.start()
+
 /// `swift run`'s unbundled executable has no Info.plist/nib, so — unlike a proper `.app`
 /// bundle (Task 23) — nothing makes this process the frontmost, regular, focusable app on its
 /// own; without this, the window can open behind other apps or never accept keystrokes at all
@@ -238,9 +248,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 }
 
-/// `PreviewView` + `OperatorPanel` side by side (Task 20's "panel beside PreviewView in an
-/// HSplitView"). `@ObservedObject`, not a plain `let`, is what makes this redraw — and, in
-/// particular, re-invoke `PreviewView.updateNSView` with a fresh `hudEnabled` — whenever the
+/// `DisplayView` + `OperatorPanel` side by side (Task 20's "panel beside PreviewView in an
+/// HSplitView"). `@ObservedObject`, not a plain `let`, is what makes this redraw whenever the
 /// operator panel changes `EngineViewModel.hudEnabled` or any other `@Published` mirror.
 struct ContentView: View {
   let engine: Engine
@@ -249,7 +258,7 @@ struct ContentView: View {
 
   var body: some View {
     HSplitView {
-      PreviewView(engine: engine, surface: keyboardSurface, hudEnabled: viewModel.hudEnabled)
+      DisplayView(host: host)
         .frame(minWidth: 480, minHeight: 360)
       OperatorPanel(vm: viewModel)
         .frame(minWidth: 300, idealWidth: 340)
