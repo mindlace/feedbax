@@ -55,20 +55,6 @@ public final class PerformerInputMonitor {
     return false
   }
 
-  /// Internal seam the tests drive directly — the real monitor closure below is a thin shell
-  /// over this plus `decideKey`. `isBound` is derived from the surface here rather than passed
-  /// in, matching `handle(_:)`'s own real path; `hasCommandOrControl` stays a parameter so
-  /// tests can exercise the chord-gating rule without synthesizing a real `NSEvent`.
-  func handleKey(characters: String?, firstResponderIsTextEditor: Bool,
-                 hasCommandOrControl: Bool = false) {
-    let isBound = characters.map(surface.handles) ?? false
-    guard Self.decideKey(firstResponderIsTextEditor: firstResponderIsTextEditor,
-                         characters: characters, isBound: isBound,
-                         hasCommandOrControl: hasCommandOrControl) == .forward,
-          let characters else { return }
-    surface.keyDown(characters)
-  }
-
   /// Installs the monitor. Returning nil from the handler CONSUMES the event, which is what
   /// keeps a forwarded key from also reaching (say) a SwiftUI button's key equivalent;
   /// returning the event passes it through untouched.
@@ -89,7 +75,7 @@ public final class PerformerInputMonitor {
 
   deinit { uninstall() }
 
-  private func handle(_ event: NSEvent) -> Decision {
+  func handle(_ event: NSEvent) -> Decision {
     switch event.type {
     case .keyDown:
       let responder = (event.window ?? NSApp.keyWindow)?.firstResponder
@@ -103,9 +89,16 @@ public final class PerformerInputMonitor {
       // `decideKey`/`surface.handles` — and stays consumed; `f` is ALSO forwarded to the
       // surface below so its `.fullscreen` toggle still flows the normal control path —
       // harmless, since `Engine.handle(_:)`'s `.fullscreen` case is a deliberate no-op. Gated on
-      // `!hasCommandOrControl` too — otherwise Cmd-F/Ctrl-F toggled fullscreen even though the
-      // chord is correctly neither forwarded to the surface nor consumed below (review finding).
-      if !isText, !hasCommandOrControl, event.keyCode == 53 || characters == "f" {
+      // `chordFlags.isEmpty` — any chord at all, not just Command/Control — because
+      // Option-`f` still reports plain `"f"` from `charactersIgnoringModifiers` and would
+      // otherwise toggle fullscreen too (review finding; the earlier `!hasCommandOrControl`
+      // check missed Option/Shift/Function chords).
+      //
+      // Escape is consumed app-wide here whenever no text editor has focus. Harmless today,
+      // but the first SwiftUI sheet or `.onExitCommand` added to `OperatorPanel` would be
+      // silently un-dismissable, since this monitor would eat the Escape before it ever
+      // reaches that responder chain.
+      if !isText, chordFlags.isEmpty, event.keyCode == 53 || characters == "f" {
         outputWindow()?.toggleFullScreen(nil)
         if event.keyCode == 53 { return .forward }   // Escape: consumed, nothing to forward
       }

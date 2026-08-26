@@ -7,13 +7,13 @@ import Metal
 /// class at all (`FrameClock` has no automated test of its own for exactly that reason — a
 /// real `CAMetalLayer` needs a real window/screen, which CI doesn't have). This file is the
 /// one place that boundary is crossed: turning "a new drawable is ready" into a call to
-/// `Engine.step` is `PreviewView`'s job, not this class's — `FrameClock` only ever forwards
-/// the display link's own `Update` to whatever closure the caller supplied.
+/// `Engine.step` is `EngineHost.renderFrame`'s job, not this class's — `FrameClock` only ever
+/// forwards the display link's own `Update` to whatever closure the caller supplied.
 public final class FrameClock: NSObject, CAMetalDisplayLinkDelegate {
   private let link: CAMetalDisplayLink
   private let tick: (CAMetalDisplayLink.Update) -> Void
 
-  /// The rate this clock is CURRENTLY pinned to. `MetalHostView.renderFrame` compares
+  /// The rate this clock is CURRENTLY pinned to. `EngineHost.renderFrame` compares
   /// `Engine.frameRate` against this every tick (final review, finding 3:
   /// `EngineViewModel.setFrameRate` only ever mutated `Engine.frameRate` itself — nothing told
   /// the already-running display link about the change, so a live preset switch silently did
@@ -38,7 +38,7 @@ public final class FrameClock: NSObject, CAMetalDisplayLinkDelegate {
   }
 
   /// Stops the display link — callers must invoke this before releasing their last reference
-  /// (e.g. `PreviewView` tearing down its `NSView`); `CAMetalDisplayLink` does not stop itself
+  /// (e.g. `DisplayLinkDriver` tearing down); `CAMetalDisplayLink` does not stop itself
   /// just because nothing external retains it, since the run loop it's attached to still holds
   /// it.
   public func invalidate() {
@@ -47,7 +47,7 @@ public final class FrameClock: NSObject, CAMetalDisplayLinkDelegate {
 
   /// Pure decision extracted so it's testable without a live `CAMetalDisplayLink`/window (this
   /// type's own doc comment: `FrameClock` needs a real `CAMetalLayer`, which CI doesn't have) —
-  /// the one headless-testable piece of finding 3's fix. `MetalHostView.renderFrame` calls
+  /// the one headless-testable piece of finding 3's fix. `EngineHost.renderFrame` calls
   /// `updateRate` unconditionally every tick; this is the guard that makes that call a no-op
   /// on every frame where the rate hasn't actually changed.
   public static func shouldRetune(currentEngineRate: Int, builtRate: Int) -> Bool {

@@ -224,9 +224,13 @@ do {
 
 /// `swift run`'s unbundled executable has no Info.plist/nib, so — unlike a proper `.app`
 /// bundle (Task 23) — nothing makes this process the frontmost, regular, focusable app on its
-/// own; without this, the window can open behind other apps or never accept keystrokes at all
-/// (review item: "keyboard likely never reaches MetalHostView" — this is the other half of
-/// that fix, `MetalHostView.viewDidMoveToWindow`'s `makeFirstResponder` call is the first).
+/// own; without this, the window can open behind other apps or never accept keystrokes at all.
+/// This still matters on the control/display split: input now arrives through
+/// `PerformerInputMonitor`'s app-level `NSEvent` local monitor rather than any per-view
+/// responder chain, and a local monitor only sees events while its process is actually
+/// frontmost and receiving them — so `setActivationPolicy(.regular)` + `activate()` here is
+/// what makes `swift run`'s unbundled process eligible to receive keystrokes at all, not a
+/// vestige of the deleted per-view `makeFirstResponder` call it used to pair with.
 /// `NSApplicationDelegateAdaptor` is SwiftUI's hook for exactly this kind of one-time AppKit
 /// setup that has to run from `applicationDidFinishLaunching`, not from a `Scene`'s `body`.
 /// `Feedbax.app`'s `FeedbaxApp.swift` doesn't need this: a real bundle with an Info.plist

@@ -316,7 +316,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   }
 
   /// Recalls glide, per `PresetStore.apply`'s own doc comment — `CACurrentMediaTime()` is the
-  /// same clock domain `MetalHostView.renderFrame` feeds `Engine.step`/`ControlRouter.tick`, so
+  /// same clock domain `EngineHost.renderFrame` feeds `Engine.step`/`ControlRouter.tick`, so
   /// the ramp this kicks off lines up with whatever frame renders next, not some other clock.
   public func recallPreset(named name: String) {
     guard let engine, let presetStore, let preset = try? presetStore.load(name: name) else { return }
