@@ -25,10 +25,18 @@ public final class PerformerInputMonitor {
 
   /// Keys are forwarded regardless of which window is key — that is the whole point — but a
   /// local monitor also sees keystrokes destined for the control panel's own text fields
-  /// (the preset-name field). Forwarding those would fire bindings while typing.
-  public static func decideKey(firstResponderIsTextEditor: Bool, characters: String?) -> Decision {
+  /// (the preset-name field) and, more broadly, EVERY keydown in the app. Returning nil from a
+  /// local monitor CONSUMES the event, so this must not forward anything it isn't actually
+  /// going to use: an unbound key (Cmd-Q, Tab, an arrow key, Space) or anything chorded with
+  /// Command/Control (a menu shortcut, a window command) has to pass through untouched, or
+  /// keyboard navigation of the app — including the control panel this monitor exists
+  /// alongside — breaks the moment no text field has focus (review finding, superseding the
+  /// brief's original "forward every key unless a text editor has focus").
+  public static func decideKey(firstResponderIsTextEditor: Bool, characters: String?,
+                                isBound: Bool, hasCommandOrControl: Bool) -> Decision {
     guard let characters, !characters.isEmpty else { return .passThrough }
-    return firstResponderIsTextEditor ? .passThrough : .forward
+    if firstResponderIsTextEditor || hasCommandOrControl || !isBound { return .passThrough }
+    return .forward
   }
 
   /// Pointer gestures are narrower than keys on purpose: they are aimed at whatever is under
@@ -48,10 +56,15 @@ public final class PerformerInputMonitor {
   }
 
   /// Internal seam the tests drive directly — the real monitor closure below is a thin shell
-  /// over this plus `decideKey`.
-  func handleKey(characters: String?, firstResponderIsTextEditor: Bool) {
+  /// over this plus `decideKey`. `isBound` is derived from the surface here rather than passed
+  /// in, matching `handle(_:)`'s own real path; `hasCommandOrControl` stays a parameter so
+  /// tests can exercise the chord-gating rule without synthesizing a real `NSEvent`.
+  func handleKey(characters: String?, firstResponderIsTextEditor: Bool,
+                 hasCommandOrControl: Bool = false) {
+    let isBound = characters.map(surface.handles) ?? false
     guard Self.decideKey(firstResponderIsTextEditor: firstResponderIsTextEditor,
-                         characters: characters) == .forward,
+                         characters: characters, isBound: isBound,
+                         hasCommandOrControl: hasCommandOrControl) == .forward,
           let characters else { return }
     surface.keyDown(characters)
   }
@@ -81,20 +94,34 @@ public final class PerformerInputMonitor {
     case .keyDown:
       let responder = (event.window ?? NSApp.keyWindow)?.firstResponder
       let isText = Self.isTextEditor(responder)
+      let characters = event.charactersIgnoringModifiers
       // Escape and `f` both toggle fullscreen (spec §01 §1: "the original's Esc"; `f` is also
-      // the bindings-table fullscreen key, `DefaultBindings.json`). Escape carries no
-      // `ToggleEvent` at all, so it is handled here directly; `f` is ALSO forwarded to the
-      // surface so its `.fullscreen` toggle still flows the normal control path — harmless,
-      // since `Engine.handle(_:)`'s `.fullscreen` case is a deliberate no-op.
-      if !isText, event.keyCode == 53 || event.charactersIgnoringModifiers == "f" {
+      // the bindings-table fullscreen key, `DefaultBindings.json`). Escape carries no binding
+      // at all — that's exactly why it's handled directly here rather than through
+      // `decideKey`/`surface.handles` — and stays consumed; `f` is ALSO forwarded to the
+      // surface below so its `.fullscreen` toggle still flows the normal control path —
+      // harmless, since `Engine.handle(_:)`'s `.fullscreen` case is a deliberate no-op.
+      if !isText, event.keyCode == 53 || characters == "f" {
         outputWindow()?.toggleFullScreen(nil)
         if event.keyCode == 53 { return .forward }   // Escape: consumed, nothing to forward
       }
-      guard Self.decideKey(firstResponderIsTextEditor: isText,
-                           characters: event.charactersIgnoringModifiers) == .forward else {
+      // A local monitor sees every keydown in the app, not just ones destined for this
+      // surface — Cmd-Q, Tab, arrow keys, Space are none of `KeyboardTrackpadSurface`'s
+      // business, and returning nil from the monitor CONSUMES the event, so an unbound key or
+      // one chorded with Command/Control must pass through untouched (review finding:
+      // forwarding unconditionally widened the blast radius from "the output view has focus"
+      // to "the whole app," swallowing ordinary app/window shortcuts and even keyboard
+      // navigation of the control panel this monitor sits alongside).
+      let isBound = characters.map(surface.handles) ?? false
+      let chordFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+      let hasCommandOrControl = chordFlags.contains(.command) || chordFlags.contains(.control)
+      guard let characters,
+            Self.decideKey(firstResponderIsTextEditor: isText, characters: characters,
+                           isBound: isBound, hasCommandOrControl: hasCommandOrControl) == .forward
+      else {
         return .passThrough
       }
-      surface.keyDown(event.charactersIgnoringModifiers!)
+      surface.keyDown(characters)
       return .forward
 
     case .scrollWheel:

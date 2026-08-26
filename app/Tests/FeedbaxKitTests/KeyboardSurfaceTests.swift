@@ -5,6 +5,17 @@ import XCTest
 /// §5's baseline-local-input — the performer's day-one input path, no exotic hardware
 /// required).
 final class KeyboardSurfaceTests: XCTestCase {
+  /// `handles` backs `PerformerInputMonitor`'s decision about whether a keydown is this
+  /// surface's business at all — `[`/`]` (the hardcoded erase step, not in `bindings.keys`),
+  /// a bound key, and an unbound/unrecognized key must each answer correctly.
+  func testHandlesReportsWhichKeysThisSurfaceActsOn() throws {
+    let s = KeyboardTrackpadSurface(bindings: try BindingsLoader.load(from: nil))
+    XCTAssertTrue(s.handles("i"), "bound toggle key")
+    XCTAssertTrue(s.handles("["), "hardcoded erase-down key")
+    XCTAssertTrue(s.handles("]"), "hardcoded erase-up key")
+    XCTAssertFalse(s.handles("e"), "not in DefaultBindings.json's keys table")
+  }
+
   func testBundledBindingsLoad() throws {
     let b = try BindingsLoader.load(from: nil)
     XCTAssertEqual(b.version, 1)
