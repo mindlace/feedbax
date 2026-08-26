@@ -21,6 +21,15 @@ extension LayerMode: Hashable {
 /// brief's step 4, not by `EngineViewModelTests`.
 public struct OperatorPanel: View {
   @ObservedObject var vm: EngineViewModel
+  /// AppKit pins a window's first responder to the preset-name field's field editor once it's
+  /// been given focus, and does NOT hand it back just because the performer clicks a slider or
+  /// a checkbox afterward (`PerformerInputMonitor.isTextEditor`'s check is reading real AppKit
+  /// state correctly — that monitor's "text editor has focus → pass through" rule is not the
+  /// bug). Left alone, that stranded focus makes every keyboard binding silently dead from the
+  /// Controls window for the rest of the session (spec goal 4) the moment a performer names a
+  /// preset. `@FocusState`, cleared on Return and Escape below, is what actually tells AppKit to
+  /// resign the field as first responder.
+  @FocusState private var presetNameFieldFocused: Bool
 
   public init(vm: EngineViewModel) {
     self.vm = vm
@@ -133,6 +142,13 @@ public struct OperatorPanel: View {
 
         Section("Presets") {
           TextField("Preset name", text: $vm.presetName)
+            .focused($presetNameFieldFocused)
+            // Return commits the name (matching Save's intent) and Escape abandons the edit —
+            // both are "done with this field" gestures, so both relinquish first responder.
+            // Without this, `f`/Escape's own fullscreen-toggle role and every other binding stay
+            // dead from Controls until the app relaunches (see this property's doc comment).
+            .onSubmit { presetNameFieldFocused = false }
+            .onExitCommand { presetNameFieldFocused = false }
           Button("Save") { vm.saveCurrentPreset() }
             .disabled(vm.presetName.isEmpty)
           if vm.presetNames.isEmpty {
