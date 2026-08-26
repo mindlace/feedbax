@@ -324,12 +324,12 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
 
   // MARK: - HUD
 
-  /// Purely a display concern owned by `OutputStage` (inside `MetalHostView`, behind
-  /// `PreviewView`) — NOT part of `ControlWrite`/`ToggleEvent`'s vocabulary, because hiding the
-  /// frame-time overlay is not something a performer's gesture asserts into the control vector,
-  /// it's a "what does the operator see" setting. `PreviewView`/`MetalHostView` read this
-  /// mirror directly (see that file's `hudEnabled` forwarding property) rather than this class
-  /// reaching into AppKit view internals it has no business touching.
+  /// Purely a display concern owned by `OutputStage` — NOT part of `ControlWrite`/`ToggleEvent`'s
+  /// vocabulary, because hiding the frame-time overlay is not something a performer's gesture
+  /// asserts into the control vector, it's a "what does the operator see" setting. The `didSet`
+  /// below forwards this mirror straight to `host.hudEnabled` (`EngineHost` in turn forwards to
+  /// `OutputStage`) — the only path there is now that the output stage is owned by `EngineHost`
+  /// rather than reachable through any particular view.
   @Published public var hudEnabled: Bool = true {
     didSet { host?.hudEnabled = hudEnabled }
   }

@@ -7,12 +7,14 @@ import Foundation
 /// sample rate, builds `Engine`, applies the webUI-parity startup defaults (spec §04 §1.1),
 /// wires up the keyboard/gamepad/operator-panel control surfaces in their tie-breaking order
 /// (design §5, spec §04 §1.2 — later surfaces win ties, so keyboard/gamepad/operator-panel is
-/// deliberate), and starts best-effort live microphone capture. Both entry points still write
-/// their own `App`/`ContentView` — that part is legitimately different per bundle (see
-/// `feedbax-dev/main.swift`'s `AppDelegate` comment for why the unbundled executable needs
-/// extra activation-policy plumbing that a real `.app` bundle gets for free from Launch
-/// Services) — but the "what does the engine actually consist of" logic now exists exactly
-/// once.
+/// deliberate), starts the always-running `EngineHost` and its `PerformerInputMonitor`, and
+/// starts best-effort live microphone capture. `FeedbaxScenes` (Task 5) is the one place both
+/// entry points build their window layout — the only thing each bundle still writes for itself
+/// is its own tiny `App` struct's `body` (`FeedbaxScenes(bootstrap:)`, verbatim) and, for the
+/// unbundled `feedbax-dev` executable, the `AppDelegate` activation-policy plumbing a real `.app`
+/// bundle gets for free from Launch Services (see that file's own comment on why). Everything
+/// about "what does the engine actually consist of" — and now "what windows does it have" —
+/// exists exactly once.
 public final class AppBootstrap {
   public let engine: Engine
   public let keyboardSurface: KeyboardTrackpadSurface

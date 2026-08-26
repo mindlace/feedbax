@@ -10,10 +10,11 @@ extension LayerMode: Hashable {
 }
 
 /// The operator's live-performance control panel (Task 20) — plain SwiftUI forms in two
-/// columns, laid out beside `PreviewView` in `feedbax-dev/main.swift`'s `HSplitView`. Every
-/// control here calls a method on `EngineViewModel`; this view never touches `Engine`/
-/// `ControlRouter` directly (design §5: the operator UI is *a surface*, not a privileged path —
-/// see `EngineViewModel`'s own type doc).
+/// columns. It is the Controls window's entire content (`FeedbaxScenes`/`ControlsWindowContent`,
+/// Task 5) — a separate window from the output, not beside it in a split view. Every control
+/// here calls a method on `EngineViewModel`; this view never touches `Engine`/`ControlRouter`
+/// directly (design §5: the operator UI is *a surface*, not a privileged path — see
+/// `EngineViewModel`'s own type doc).
 ///
 /// SwiftUI view code has no unit-test rig in this codebase (`EngineViewModelTests` covers the
 /// model this view drives; there is no snapshot/UI test harness for the view itself) — this
@@ -143,10 +144,14 @@ public struct OperatorPanel: View {
         Section("Presets") {
           TextField("Preset name", text: $vm.presetName)
             .focused($presetNameFieldFocused)
-            // Return commits the name (matching Save's intent) and Escape abandons the edit —
-            // both are "done with this field" gestures, so both relinquish first responder.
-            // Without this, `f`/Escape's own fullscreen-toggle role and every other binding stay
-            // dead from Controls until the app relaunches (see this property's doc comment).
+            // Both Return and Escape just relinquish first responder — neither actually commits
+            // or reverts anything here: `$vm.presetName` has already been written character by
+            // character regardless of which key ends the edit (Escape does NOT restore whatever
+            // the field held before typing started), and saving the preset is still a separate,
+            // explicit "Save" button press. Both keys are just "done with this field" gestures.
+            // Without releasing focus on them, `f`/Escape's own fullscreen-toggle role and every
+            // other binding stay dead from Controls until the app relaunches (see this
+            // property's doc comment).
             .onSubmit { presetNameFieldFocused = false }
             .onExitCommand { presetNameFieldFocused = false }
           Button("Save") { vm.saveCurrentPreset() }

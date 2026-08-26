@@ -9,22 +9,33 @@ public enum FeedbaxWindow {
   public static let controlsID = "controls"
 }
 
-/// The Output window's whole content, split out of `FeedbaxScenes.body` only so it can carry the
-/// launch-time `.onAppear` that opens Controls (Ruling 11) — see that modifier's doc comment.
+/// The launch-time "make sure both windows are open" one-shot (Ruling 11), shared by both
+/// windows' content so it fires regardless of which one macOS actually opens on cold launch —
+/// see the two content views below for why relying on just one of them isn't enough.
+private enum LaunchWindowOpener {
+  /// Spec goal 1 is that output and controls are separate windows a performer places on
+  /// separate screens — "open Controls once from the Window menu after every launch" is not that
+  /// experience. `static`, not `@State`: this must survive across possible view rebuilds of the
+  /// SAME process (the `Window` scene's underlying `NSWindow` survives close/reopen — see
+  /// `RenderView`'s doc comment — but nothing guarantees SwiftUI never reconstructs a leaf view's
+  /// identity while doing so) and it must NOT reset merely because a window was closed and
+  /// reopened. A performer who deliberately closes one window must find it still closed later in
+  /// the same process — this guard fires at most once per process, not once per appearance.
+  private static var hasOpenedCompanionOnce = false
+
+  static func openCompanionOnce(_ open: () -> Void) {
+    guard !hasOpenedCompanionOnce else { return }
+    hasOpenedCompanionOnce = true
+    open()
+  }
+}
+
+/// The Output window's whole content. Carries the launch-time `.onAppear` that opens Controls
+/// (via the shared `LaunchWindowOpener`) — see `ControlsWindowContent` for why the SAME trigger
+/// also lives there.
 private struct OutputWindowContent: View {
   let host: EngineHost
   @Environment(\.openWindow) private var openWindow
-
-  /// Spec goal 1 is that output and controls are separate windows a performer places on
-  /// separate screens — "open Controls once from the Window menu after every launch" is not
-  /// that experience. `static`, not `@State`: this must survive across possible view rebuilds of
-  /// the SAME process (the `Window` scene's underlying `NSWindow` survives close/reopen — see
-  /// `RenderView`'s doc comment — but nothing guarantees SwiftUI never reconstructs this leaf
-  /// view's identity while doing so) and it must NOT reset merely because the Output window was
-  /// closed and reopened. A performer who deliberately closes Controls and later reopens Output
-  /// must find Controls still closed, exactly as they left it — this guard only ever fires once
-  /// per process, not once per Output-window-appearance.
-  private static var hasOpenedControlsOnce = false
 
   var body: some View {
     DisplayView(host: host)
@@ -34,9 +45,29 @@ private struct OutputWindowContent: View {
       .background(Color.black)
       .ignoresSafeArea()
       .onAppear {
-        guard !Self.hasOpenedControlsOnce else { return }
-        Self.hasOpenedControlsOnce = true
-        openWindow(id: FeedbaxWindow.controlsID)
+        LaunchWindowOpener.openCompanionOnce { openWindow(id: FeedbaxWindow.controlsID) }
+      }
+  }
+}
+
+/// The Controls window's whole content. Only SwiftUI decides which one `Window` scene opens
+/// automatically on a cold launch (observed: Output does, today) — a session whose window-state
+/// restoration instead brings back Controls first (e.g. because the performer had left Output
+/// closed at last quit) would otherwise never fire `OutputWindowContent`'s `.onAppear` at all,
+/// leaving that performer with only Controls. Carrying the identical one-shot here, guarded by
+/// the SAME shared `LaunchWindowOpener`, makes "both windows end up open at launch" hold no
+/// matter which one macOS actually constructs first — `openWindow` on an already-open window is
+/// a harmless no-op (it just focuses it), so there's no risk of the two content views bouncing
+/// each other back open in a loop.
+private struct ControlsWindowContent: View {
+  let viewModel: EngineViewModel
+  @Environment(\.openWindow) private var openWindow
+
+  var body: some View {
+    OperatorPanel(vm: viewModel)
+      .frame(minWidth: 300, minHeight: 400)
+      .onAppear {
+        LaunchWindowOpener.openCompanionOnce { openWindow(id: FeedbaxWindow.outputID) }
       }
   }
 }
@@ -61,8 +92,7 @@ public struct FeedbaxScenes: Scene {
     .defaultSize(width: 1280, height: 720)
 
     Window("Controls", id: FeedbaxWindow.controlsID) {
-      OperatorPanel(vm: bootstrap.viewModel)
-        .frame(minWidth: 300, minHeight: 400)
+      ControlsWindowContent(viewModel: bootstrap.viewModel)
     }
     .defaultSize(width: 720, height: 800)
   }

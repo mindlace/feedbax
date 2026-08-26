@@ -57,15 +57,22 @@ public final class RenderView: NSView, RenderTarget {
   /// menu with its SwiftUI state intact. That means `viewDidMoveToWindow` only ever fires ONCE,
   /// at initial window creation — clicking close never moves this view to a nil window, so the
   /// `window == nil` branch below is dead in practice for a `Window` scene (kept as a backstop
-  /// for a hypothetical real teardown). Relying on it alone left `EngineHost` wedged on the
-  /// display-linked driver bound to the now-hidden window's layer — whose display link stops
+  /// for a hypothetical real teardown). Relying on lifecycle alone left `EngineHost` wedged on
+  /// the display-linked driver bound to the now-hidden window's layer — whose display link stops
   /// delivering ticks once the window has no on-screen presence — which silently froze not just
   /// rendering but `engine.step` itself (and therefore every queued control write) until the
   /// window was manually reopened, defeating spec goal 2 entirely. Observing `isVisible`
   /// directly tracks the thing that actually changes on close/reopen, for both directions: it
   /// goes false on close (attach → detach, matching this view's `deinit`/nil-window teardown
   /// path) and true again when reopened from the Window menu (no separate "became key/main"
-  /// hook needed — re-attaching on visibility is what lets the display link resume).
+  /// hook needed — re-attaching on visibility is what lets the display link resume). The INITIAL
+  /// call below is gated on `window.isVisible` too, not an unconditional `attach` — a view can be
+  /// installed into a window that is already hidden at that moment (e.g. window-state restoration
+  /// bringing back an Output the performer had closed before quitting), and with a bare `attach`
+  /// there the host would land on a display-linked driver bound to that already-hidden layer with
+  /// no KVO change ever arriving to correct it (`options: [.new]` only fires on a SUBSEQUENT
+  /// transition) — the exact freeze this comment describes, reappearing through a cold-launch
+  /// path a manual pass that always launches into a visible window would never exercise.
   public override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     syncDrawableSize()
@@ -74,7 +81,7 @@ public final class RenderView: NSView, RenderTarget {
       host.detach(self)
       return
     }
-    host.attach(self)
+    window.isVisible ? host.attach(self) : host.detach(self)
     visibilityObservation = window.observe(\.isVisible, options: [.new]) { [weak self] _, change in
       guard let self, let isVisible = change.newValue else { return }
       isVisible ? self.host.attach(self) : self.host.detach(self)
