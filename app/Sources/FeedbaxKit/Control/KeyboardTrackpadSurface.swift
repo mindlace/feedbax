@@ -69,6 +69,14 @@ public final class KeyboardTrackpadSurface: ControlSurface {
     self.stateSnapshot = stateSnapshot
   }
 
+  /// Whether this surface has anything bound to `key` — `[`/`]` (the hardcoded erase step) or
+  /// an entry in `bindings.keys`. `PerformerInputMonitor` uses this to decide whether a keydown
+  /// is actually ours to consume, rather than forwarding (and swallowing) every unbound key
+  /// app-wide — Cmd-Q, Tab, arrow keys, Space, none of which this surface does anything with.
+  public func handles(_ key: String) -> Bool {
+    key == "[" || key == "]" || bindings.keys[key] != nil
+  }
+
   public func keyDown(_ key: String) {
     if key == "[" {
       pendingEraseStep = (pendingEraseStep ?? 0) - Self.eraseStepMagnitude

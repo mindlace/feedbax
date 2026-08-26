@@ -1,5 +1,6 @@
 import XCTest
 import Foundation
+import Combine
 @testable import FeedbaxKit
 
 final class EngineViewModelTests: XCTestCase {
@@ -117,5 +118,34 @@ final class EngineViewModelTests: XCTestCase {
     XCTAssertEqual(vm.warpFilter, .nearest)
     vm.setWarpFilter(.linear)
     XCTAssertEqual(vm.warpFilter, .linear)
+  }
+
+  func testPollDoesNotRepublishWhenNothingChanged() throws {
+    let engine = try Engine(context: try MetalContext())
+    let vm = EngineViewModel(engine: engine, presetStore: PresetStore())
+    var publishCount = 0
+    let subscription = vm.objectWillChange.sink { _ in publishCount += 1 }
+    defer { subscription.cancel() }
+
+    _ = vm.poll(0)          // first poll may legitimately publish (mirrors sync to truth)
+    publishCount = 0
+    _ = vm.poll(1)
+    _ = vm.poll(2)
+    XCTAssertEqual(publishCount, 0,
+                   "an idle frame must not re-render the operator panel")
+  }
+
+  func testPollStillPublishesWhenTruthChanges() throws {
+    let engine = try Engine(context: try MetalContext())
+    let vm = EngineViewModel(engine: engine, presetStore: PresetStore())
+    _ = vm.poll(0)
+    var publishCount = 0
+    let subscription = vm.objectWillChange.sink { _ in publishCount += 1 }
+    defer { subscription.cancel() }
+
+    engine.waveforms.wave1Enabled = !engine.waveforms.wave1Enabled
+    _ = vm.poll(1)
+    XCTAssertGreaterThan(publishCount, 0, "a real change still reaches the panel")
+    XCTAssertEqual(vm.wave1On, engine.waveforms.wave1Enabled)
   }
 }

@@ -30,4 +30,12 @@ final class AppBootstrapTests: XCTestCase {
       XCTAssertEqual(AppBootstrap.probeInputSampleRate(), first)
     }
   }
+
+  /// SwiftUI restores each `Window` scene's frame by its id — the two ids must never collide
+  /// or drift.
+  func testWindowIdentifiersAreDistinctAndStable() {
+    XCTAssertEqual(FeedbaxWindow.outputID, "output")
+    XCTAssertEqual(FeedbaxWindow.controlsID, "controls")
+    XCTAssertNotEqual(FeedbaxWindow.outputID, FeedbaxWindow.controlsID)
+  }
 }

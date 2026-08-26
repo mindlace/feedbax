@@ -224,9 +224,13 @@ do {
 
 /// `swift run`'s unbundled executable has no Info.plist/nib, so — unlike a proper `.app`
 /// bundle (Task 23) — nothing makes this process the frontmost, regular, focusable app on its
-/// own; without this, the window can open behind other apps or never accept keystrokes at all
-/// (review item: "keyboard likely never reaches MetalHostView" — this is the other half of
-/// that fix, `MetalHostView.viewDidMoveToWindow`'s `makeFirstResponder` call is the first).
+/// own; without this, the window can open behind other apps or never accept keystrokes at all.
+/// This still matters on the control/display split: input now arrives through
+/// `PerformerInputMonitor`'s app-level `NSEvent` local monitor rather than any per-view
+/// responder chain, and a local monitor only sees events while its process is actually
+/// frontmost and receiving them — so `setActivationPolicy(.regular)` + `activate()` here is
+/// what makes `swift run`'s unbundled process eligible to receive keystrokes at all, not a
+/// vestige of the deleted per-view `makeFirstResponder` call it used to pair with.
 /// `NSApplicationDelegateAdaptor` is SwiftUI's hook for exactly this kind of one-time AppKit
 /// setup that has to run from `applicationDidFinishLaunching`, not from a `Scene`'s `body`.
 /// `Feedbax.app`'s `FeedbaxApp.swift` doesn't need this: a real bundle with an Info.plist
@@ -238,39 +242,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   }
 }
 
-/// `PreviewView` + `OperatorPanel` side by side (Task 20's "panel beside PreviewView in an
-/// HSplitView"). `@ObservedObject`, not a plain `let`, is what makes this redraw — and, in
-/// particular, re-invoke `PreviewView.updateNSView` with a fresh `hudEnabled` — whenever the
-/// operator panel changes `EngineViewModel.hudEnabled` or any other `@Published` mirror.
-struct ContentView: View {
-  let engine: Engine
-  let keyboardSurface: KeyboardTrackpadSurface
-  @ObservedObject var viewModel: EngineViewModel
-
-  var body: some View {
-    HSplitView {
-      PreviewView(engine: engine, surface: keyboardSurface, hudEnabled: viewModel.hudEnabled)
-        .frame(minWidth: 480, minHeight: 360)
-      OperatorPanel(vm: viewModel)
-        .frame(minWidth: 300, idealWidth: 340)
-    }
-  }
-}
-
-/// SwiftUI's `App` protocol requires a bare `init()` (the system constructs the app struct
-/// itself), so `bootstrap` can't be passed in as a constructor argument — it's the file-scope
-/// global built above instead, referenced directly from `body`.
 struct FeedbaxApp: App {
   @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
   var body: some Scene {
-    WindowGroup("Feedbax") {
-      ContentView(
-        engine: bootstrap.engine, keyboardSurface: bootstrap.keyboardSurface,
-        viewModel: bootstrap.viewModel
-      )
-      .frame(minWidth: 800, minHeight: 400)
-    }
+    FeedbaxScenes(bootstrap: bootstrap)
   }
 }
 

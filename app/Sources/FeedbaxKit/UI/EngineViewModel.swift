@@ -167,18 +167,32 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   }
 
   /// The read side of finding 4's single-owner fix — see `poll`'s call site for why this runs
-  /// every frame. `engine == nil` (the bare `EngineViewModel()` unit tests construct) makes this
-  /// a harmless no-op, same as every other engine-touching method in this class.
+  /// every frame. `engine == nil` (the bare `EngineViewModel()` unit tests construct) makes
+  /// this a harmless no-op, same as every other engine-touching method in this class.
+  ///
+  /// Every assignment here is guarded by a compare, because `poll` runs at the frame rate: a
+  /// bare assignment to a `@Published` property fires `objectWillChange` even when the value
+  /// is identical, which re-evaluated `OperatorPanel.body` 60 times a second for nothing. With
+  /// the panel in its own window (the control/display split) that waste is a whole window's
+  /// draw cycle, not a corner of one.
   private func refreshMirrorsFromTruth() {
     guard let engine else { return }
-    sInvertOn = engine.router.sInvert < 0   // `sInvert` is ±1 — ControlRouter's own doc comment
-    layerOn = engine.sticker.layer.enabled  // sticker/movie kept in lockstep — Engine.handle
-    wave1On = engine.waveforms.wave1Enabled
-    wave2On = engine.waveforms.wave2Enabled
-    worldBumpOn = engine.bumpsEnabled.world
-    waveBumpOn = engine.bumpsEnabled.wave
-    kittyBumpOn = engine.bumpsEnabled.kitty
-    eraseValue = Double(engine.router.eraseControl)
+    let newSInvert = engine.router.sInvert < 0   // `sInvert` is ±1 — ControlRouter's own doc
+    if sInvertOn != newSInvert { sInvertOn = newSInvert }
+    let newLayerOn = engine.sticker.layer.enabled  // sticker/movie lockstep — Engine.handle
+    if layerOn != newLayerOn { layerOn = newLayerOn }
+    let newWave1On = engine.waveforms.wave1Enabled
+    if wave1On != newWave1On { wave1On = newWave1On }
+    let newWave2On = engine.waveforms.wave2Enabled
+    if wave2On != newWave2On { wave2On = newWave2On }
+    let newWorldBumpOn = engine.bumpsEnabled.world
+    if worldBumpOn != newWorldBumpOn { worldBumpOn = newWorldBumpOn }
+    let newWaveBumpOn = engine.bumpsEnabled.wave
+    if waveBumpOn != newWaveBumpOn { waveBumpOn = newWaveBumpOn }
+    let newKittyBumpOn = engine.bumpsEnabled.kitty
+    if kittyBumpOn != newKittyBumpOn { kittyBumpOn = newKittyBumpOn }
+    let newEraseValue = Double(engine.router.eraseControl)
+    if eraseValue != newEraseValue { eraseValue = newEraseValue }
   }
 
   /// Reapplies this object's OWN just-queued toggles on top of whatever `refreshMirrorsFromTruth`
@@ -302,7 +316,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   }
 
   /// Recalls glide, per `PresetStore.apply`'s own doc comment — `CACurrentMediaTime()` is the
-  /// same clock domain `MetalHostView.renderFrame` feeds `Engine.step`/`ControlRouter.tick`, so
+  /// same clock domain `EngineHost.renderFrame` feeds `Engine.step`/`ControlRouter.tick`, so
   /// the ramp this kicks off lines up with whatever frame renders next, not some other clock.
   public func recallPreset(named name: String) {
     guard let engine, let presetStore, let preset = try? presetStore.load(name: name) else { return }
@@ -324,13 +338,20 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
 
   // MARK: - HUD
 
-  /// Purely a display concern owned by `OutputStage` (inside `MetalHostView`, behind
-  /// `PreviewView`) — NOT part of `ControlWrite`/`ToggleEvent`'s vocabulary, because hiding the
-  /// frame-time overlay is not something a performer's gesture asserts into the control vector,
-  /// it's a "what does the operator see" setting. `PreviewView`/`MetalHostView` read this
-  /// mirror directly (see that file's `hudEnabled` forwarding property) rather than this class
-  /// reaching into AppKit view internals it has no business touching.
-  @Published public var hudEnabled: Bool = true
+  /// Purely a display concern owned by `OutputStage` — NOT part of `ControlWrite`/`ToggleEvent`'s
+  /// vocabulary, because hiding the frame-time overlay is not something a performer's gesture
+  /// asserts into the control vector, it's a "what does the operator see" setting. The `didSet`
+  /// below forwards this mirror straight to `host.hudEnabled` (`EngineHost` in turn forwards to
+  /// `OutputStage`) — the only path there is now that the output stage is owned by `EngineHost`
+  /// rather than reachable through any particular view.
+  @Published public var hudEnabled: Bool = true {
+    didSet { host?.hudEnabled = hudEnabled }
+  }
+
+  /// Set by `AppBootstrap.start()`. The HUD toggle used to reach `OutputStage` by way of
+  /// `PreviewView.updateNSView`; with the output stage owned by `EngineHost` there is no view
+  /// in that path any more, so the toggle talks to the host directly.
+  public weak var host: EngineHost?
 
   // MARK: - Init
 

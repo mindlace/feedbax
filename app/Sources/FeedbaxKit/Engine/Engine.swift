@@ -300,7 +300,7 @@ public final class Engine {
       sticker.layer.enabled = on
       movie.layer.enabled = on
     case .fullscreen:
-      break   // one-shot UI action — `PreviewView` (fullscreen)
+      break   // one-shot UI action — `PerformerInputMonitor` (fullscreen)
     case .stillCapture:
       // Task 21: write the last completed frame to ~/Pictures/Feedbax/ as a dated PNG.
       // Synchronous by design: readPixels → waitUntilCompleted → CGImage write. The hitch this

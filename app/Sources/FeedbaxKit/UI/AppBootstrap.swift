@@ -7,16 +7,20 @@ import Foundation
 /// sample rate, builds `Engine`, applies the webUI-parity startup defaults (spec §04 §1.1),
 /// wires up the keyboard/gamepad/operator-panel control surfaces in their tie-breaking order
 /// (design §5, spec §04 §1.2 — later surfaces win ties, so keyboard/gamepad/operator-panel is
-/// deliberate), and starts best-effort live microphone capture. Both entry points still write
-/// their own `App`/`ContentView` — that part is legitimately different per bundle (see
-/// `feedbax-dev/main.swift`'s `AppDelegate` comment for why the unbundled executable needs
-/// extra activation-policy plumbing that a real `.app` bundle gets for free from Launch
-/// Services) — but the "what does the engine actually consist of" logic now exists exactly
-/// once.
+/// deliberate), starts the always-running `EngineHost` and its `PerformerInputMonitor`, and
+/// starts best-effort live microphone capture. `FeedbaxScenes` (Task 5) is the one place both
+/// entry points build their window layout — the only thing each bundle still writes for itself
+/// is its own tiny `App` struct's `body` (`FeedbaxScenes(bootstrap:)`, verbatim) and, for the
+/// unbundled `feedbax-dev` executable, the `AppDelegate` activation-policy plumbing a real `.app`
+/// bundle gets for free from Launch Services (see that file's own comment on why). Everything
+/// about "what does the engine actually consist of" — and now "what windows does it have" —
+/// exists exactly once.
 public final class AppBootstrap {
   public let engine: Engine
   public let keyboardSurface: KeyboardTrackpadSurface
   public let viewModel: EngineViewModel
+  public let host: EngineHost
+  public let inputMonitor: PerformerInputMonitor
 
   /// Kept alive purely so ARC doesn't tear down the mic tap the instant `start()` returns —
   /// nothing reads this property directly; `AudioBands` (owned by `engine`) is the interface
@@ -27,11 +31,13 @@ public final class AppBootstrap {
 
   private init(
     engine: Engine, keyboardSurface: KeyboardTrackpadSurface, viewModel: EngineViewModel,
-    audioAnalysis: AudioAnalysis
+    host: EngineHost, inputMonitor: PerformerInputMonitor, audioAnalysis: AudioAnalysis
   ) {
     self.engine = engine
     self.keyboardSurface = keyboardSurface
     self.viewModel = viewModel
+    self.host = host
+    self.inputMonitor = inputMonitor
     self.audioAnalysis = audioAnalysis
   }
 
@@ -81,6 +87,18 @@ public final class AppBootstrap {
     // arbitration this baseline doesn't implement yet.
     engine.router.surfaces = [keyboard, gamepad, viewModel]
 
+    // The host owns the clock from here on, and starts stepping BEFORE any window exists —
+    // that ordering is the point of the split (spec goal 2). `OutputStage` construction now
+    // throws out of here instead of being swallowed by `try?` inside the render view.
+    let host = try EngineHost(engine: engine)
+    host.start()
+    host.hudEnabled = viewModel.hudEnabled
+    viewModel.host = host
+
+    let inputMonitor = PerformerInputMonitor(
+      surface: keyboard, outputWindow: { [weak host] in host?.attachedWindow })
+    inputMonitor.install()
+
     // Live microphone input is deliberately NOT part of `Engine` (design/Task 19: `Engine.step`
     // must stay pure and injectable for the determinism test/golden harness). `AudioAnalysis` is
     // the one place this codebase touches `AVAudioEngine`, and it only ever starts here, when a
@@ -95,7 +113,8 @@ public final class AppBootstrap {
     }
 
     return AppBootstrap(
-      engine: engine, keyboardSurface: keyboard, viewModel: viewModel, audioAnalysis: audioAnalysis
+      engine: engine, keyboardSurface: keyboard, viewModel: viewModel, host: host,
+      inputMonitor: inputMonitor, audioAnalysis: audioAnalysis
     )
   }
 
