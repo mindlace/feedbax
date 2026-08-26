@@ -95,13 +95,17 @@ public final class PerformerInputMonitor {
       let responder = (event.window ?? NSApp.keyWindow)?.firstResponder
       let isText = Self.isTextEditor(responder)
       let characters = event.charactersIgnoringModifiers
+      let chordFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+      let hasCommandOrControl = chordFlags.contains(.command) || chordFlags.contains(.control)
       // Escape and `f` both toggle fullscreen (spec §01 §1: "the original's Esc"; `f` is also
       // the bindings-table fullscreen key, `DefaultBindings.json`). Escape carries no binding
       // at all — that's exactly why it's handled directly here rather than through
       // `decideKey`/`surface.handles` — and stays consumed; `f` is ALSO forwarded to the
       // surface below so its `.fullscreen` toggle still flows the normal control path —
-      // harmless, since `Engine.handle(_:)`'s `.fullscreen` case is a deliberate no-op.
-      if !isText, event.keyCode == 53 || characters == "f" {
+      // harmless, since `Engine.handle(_:)`'s `.fullscreen` case is a deliberate no-op. Gated on
+      // `!hasCommandOrControl` too — otherwise Cmd-F/Ctrl-F toggled fullscreen even though the
+      // chord is correctly neither forwarded to the surface nor consumed below (review finding).
+      if !isText, !hasCommandOrControl, event.keyCode == 53 || characters == "f" {
         outputWindow()?.toggleFullScreen(nil)
         if event.keyCode == 53 { return .forward }   // Escape: consumed, nothing to forward
       }
@@ -113,8 +117,6 @@ public final class PerformerInputMonitor {
       // to "the whole app," swallowing ordinary app/window shortcuts and even keyboard
       // navigation of the control panel this monitor sits alongside).
       let isBound = characters.map(surface.handles) ?? false
-      let chordFlags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-      let hasCommandOrControl = chordFlags.contains(.command) || chordFlags.contains(.control)
       guard let characters,
             Self.decideKey(firstResponderIsTextEditor: isText, characters: characters,
                            isBound: isBound, hasCommandOrControl: hasCommandOrControl) == .forward

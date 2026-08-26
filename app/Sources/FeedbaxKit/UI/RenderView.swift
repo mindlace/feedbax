@@ -22,6 +22,9 @@ public struct DisplayView: NSViewRepresentable {
 public final class RenderView: NSView, RenderTarget {
   private let host: EngineHost
   private let layerForMetal = CAMetalLayer()
+  /// Tracks the hosting window's `isVisible`, not its lifecycle — see `viewDidMoveToWindow`'s
+  /// doc comment for why lifecycle alone (`window == nil`) isn't enough here.
+  private var visibilityObservation: NSKeyValueObservation?
 
   public var metalLayer: CAMetalLayer { layerForMetal }
   public var drawableSizePixels: SIMD2<Int> {
@@ -48,17 +51,34 @@ public final class RenderView: NSView, RenderTarget {
 
   public override func makeBackingLayer() -> CALayer { layerForMetal }
 
+  /// `Window` scenes (as opposed to `WindowGroup`) do not deallocate their `NSWindow` when the
+  /// performer clicks the close button — SwiftUI keeps it alive, merely hidden
+  /// (`isVisible == false`, still `screen != nil`), so it can reopen instantly from the Window
+  /// menu with its SwiftUI state intact. That means `viewDidMoveToWindow` only ever fires ONCE,
+  /// at initial window creation — clicking close never moves this view to a nil window, so the
+  /// `window == nil` branch below is dead in practice for a `Window` scene (kept as a backstop
+  /// for a hypothetical real teardown). Relying on it alone left `EngineHost` wedged on the
+  /// display-linked driver bound to the now-hidden window's layer — whose display link stops
+  /// delivering ticks once the window has no on-screen presence — which silently froze not just
+  /// rendering but `engine.step` itself (and therefore every queued control write) until the
+  /// window was manually reopened, defeating spec goal 2 entirely. Observing `isVisible`
+  /// directly tracks the thing that actually changes on close/reopen, for both directions: it
+  /// goes false on close (attach → detach, matching this view's `deinit`/nil-window teardown
+  /// path) and true again when reopened from the Window menu (no separate "became key/main"
+  /// hook needed — re-attaching on visibility is what lets the display link resume).
   public override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
     syncDrawableSize()
-    guard window != nil else {
-      // Window closed. `EngineHost.detach` swaps back to the timer driver — the engine keeps
-      // stepping, the accumulator keeps evolving, and reopening the window picks the image up
-      // where it actually is rather than where it was when the window closed.
+    visibilityObservation = nil
+    guard let window else {
       host.detach(self)
       return
     }
     host.attach(self)
+    visibilityObservation = window.observe(\.isVisible, options: [.new]) { [weak self] _, change in
+      guard let self, let isVisible = change.newValue else { return }
+      isVisible ? self.host.attach(self) : self.host.detach(self)
+    }
   }
 
   deinit { host.detach(self) }

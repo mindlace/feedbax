@@ -17,6 +17,8 @@ public final class AppBootstrap {
   public let engine: Engine
   public let keyboardSurface: KeyboardTrackpadSurface
   public let viewModel: EngineViewModel
+  public let host: EngineHost
+  public let inputMonitor: PerformerInputMonitor
 
   /// Kept alive purely so ARC doesn't tear down the mic tap the instant `start()` returns —
   /// nothing reads this property directly; `AudioBands` (owned by `engine`) is the interface
@@ -27,11 +29,13 @@ public final class AppBootstrap {
 
   private init(
     engine: Engine, keyboardSurface: KeyboardTrackpadSurface, viewModel: EngineViewModel,
-    audioAnalysis: AudioAnalysis
+    host: EngineHost, inputMonitor: PerformerInputMonitor, audioAnalysis: AudioAnalysis
   ) {
     self.engine = engine
     self.keyboardSurface = keyboardSurface
     self.viewModel = viewModel
+    self.host = host
+    self.inputMonitor = inputMonitor
     self.audioAnalysis = audioAnalysis
   }
 
@@ -81,6 +85,18 @@ public final class AppBootstrap {
     // arbitration this baseline doesn't implement yet.
     engine.router.surfaces = [keyboard, gamepad, viewModel]
 
+    // The host owns the clock from here on, and starts stepping BEFORE any window exists —
+    // that ordering is the point of the split (spec goal 2). `OutputStage` construction now
+    // throws out of here instead of being swallowed by `try?` inside the render view.
+    let host = try EngineHost(engine: engine)
+    host.start()
+    host.hudEnabled = viewModel.hudEnabled
+    viewModel.host = host
+
+    let inputMonitor = PerformerInputMonitor(
+      surface: keyboard, outputWindow: { [weak host] in host?.attachedWindow })
+    inputMonitor.install()
+
     // Live microphone input is deliberately NOT part of `Engine` (design/Task 19: `Engine.step`
     // must stay pure and injectable for the determinism test/golden harness). `AudioAnalysis` is
     // the one place this codebase touches `AVAudioEngine`, and it only ever starts here, when a
@@ -95,7 +111,8 @@ public final class AppBootstrap {
     }
 
     return AppBootstrap(
-      engine: engine, keyboardSurface: keyboard, viewModel: viewModel, audioAnalysis: audioAnalysis
+      engine: engine, keyboardSurface: keyboard, viewModel: viewModel, host: host,
+      inputMonitor: inputMonitor, audioAnalysis: audioAnalysis
     )
   }
 

@@ -330,7 +330,14 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   /// it's a "what does the operator see" setting. `PreviewView`/`MetalHostView` read this
   /// mirror directly (see that file's `hudEnabled` forwarding property) rather than this class
   /// reaching into AppKit view internals it has no business touching.
-  @Published public var hudEnabled: Bool = true
+  @Published public var hudEnabled: Bool = true {
+    didSet { host?.hudEnabled = hudEnabled }
+  }
+
+  /// Set by `AppBootstrap.start()`. The HUD toggle used to reach `OutputStage` by way of
+  /// `PreviewView.updateNSView`; with the output stage owned by `EngineHost` there is no view
+  /// in that path any more, so the toggle talks to the host directly.
+  public weak var host: EngineHost?
 
   // MARK: - Init
 
