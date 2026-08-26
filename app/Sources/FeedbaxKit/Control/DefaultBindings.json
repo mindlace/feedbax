@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "keys": {
+    "i": "sInvert",
+    "w": "worldBumpEnabled",
+    "a": "waveBumpEnabled",
+    "k": "kittyBumpEnabled",
+    "p": "layerEnabled",
+    "f": "fullscreen",
+    "s": "stillCapture",
+    "1": "wave1Enabled",
+    "2": "wave2Enabled"
+  },
+  "trackpad": {
+    "panX": {"slot": "panX", "sensitivity": 1.0},
+    "panY": {"slot": "panY", "sensitivity": 1.0},
+    "zoom": {"slot": "zoom", "sensitivity": 1.0},
+    "hue": {"slot": "hue", "sensitivity": 1.0},
+    "theta": {"slot": "theta", "sensitivity": 1.0}
+  }
+}

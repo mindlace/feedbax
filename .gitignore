@@ -15,3 +15,7 @@ output/*
 admin/.venv/
 __pycache__/
 *.pyc
+
+# Swift package build products
+app/.build/
+app/Feedbax.xcodeproj/

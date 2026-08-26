@@ -5,6 +5,17 @@
 
 # Render loop, feedback core, and shader chain
 
+> **Corrections (2026-08-24, evening; evidence in
+> `docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md`):**
+> * §5 "saturation and lightness … would clip/desaturate at the extremes": **not so.**
+>   Jitter's reference `cc.hsl2rgb.jxs` converts the raw S/L (`v2 = L·(1+S)`); the char
+>   texture clips each RGB channel afterwards. Above S = 1 that pair is a multiplicative gain
+>   of (1 + δ/2) per frame on the max channel — the SATURATION fader's real effect.
+> * §1/§4: the loop's resample filter is a first-order term of the look. Sean's `fst` was
+>   `@filter none` (nearest); a bilinear loop forgets a 12-px seed in ~15 generations, a
+>   nearest loop keeps it ~250. The retrofit node's capture-texture filter is still to be
+>   read off the running patch.
+
 Scope: `patches/Feedbax.maxpat` (main patch, top-level `/`) and `patches/feedbax.shaderfx.maxpat` (subpatch `p shaderfx`, instantiated as `feedbax.shaderfx` [obj-148] in the main patch). All object ids below are from the main patch unless prefixed `sfx:` (shaderfx patch) or `v122:` (the retired chain, from the listing of archived `v122debuggingisg`, `//shaderfx#obj-148`).
 
 ## 0. Terms used below
@@ -80,9 +91,13 @@ Two independent `pak erase_color 0. 0. 0. 1.` boxes exist:
 
 **`erasetransparency` mapping:** `r erasetransparency`[obj-119] → `scale 0 1. 0.8 1. 3.`[obj-84] → `pak erase_color`[obj-56] inlet 4 → jit.gl.render[obj-49]. **No smoothing** (this path does not go through mIniCtlSmooth).
 
-`scale lo hi lo2 hi2 exp` with `lo=0 hi=1 lo2=0.8 hi2=1.0 exp=3`: for normalized input fraction `f=(in-0)/(1-0)=in`, output `= 0.8 + 0.2 · f^3`. Because the exponent is 3 (>1), the curve is biased toward the low end: **the erase alpha sits close to 0.8 for most of the knob's travel and only rises sharply toward 1.0 near the very top.** Concretely: `f=0.5 → alpha≈0.825`; `f=0.8 → alpha≈0.902`; `f=0.9 → alpha≈0.946`; `f=1.0 → alpha=1.0`.
+`scale lo hi lo2 hi2 exp` with `lo=0 hi=1 lo2=0.8 hi2=1.0 exp=3`. **Measured on the running patch (2026-08-24), not derived:** `scale` defaults to `@classic 1`, and in classic mode an exponent `>1` gives an *exponential* curve, `alpha = 0.8 + 0.2 · 3^(f−1)`, not the modern-mode power curve `0.8 + 0.2 · f³` this paragraph previously claimed. The curve is therefore biased **high**, not low: `f=0.25 → 0.888`; `f=0.5 → 0.9155` (measured); `f=0.75 → 0.952`; `f=0.9 → 0.979`; `f=1.0 → 1.0`. The port's `ShaderMath/MaxScale.swift` is the reference implementation (it was corrected against the live patch in commit `b336206`; the earlier modern-mode reading survived review and was frozen into the golden suite — see `docs/superpowers/specs/2026-08-24-whiteout-next-steps.md`, "Method note").
 
-**What this does to the image, precisely:** standard Jitter behaviour, `erase` with `erase_color` alpha `a<1` and blending on draws a translucent black quad over the previous frame instead of clearing it. A pixel's contribution from `n` frames ago survives at `(1-a)^n` of its original value (each tick multiplies the residual by `(1-a)`). Because `a` never goes below **0.8**, the residual after one frame is at most `0.2`, after two frames at most `0.04`, after three frames at most `0.008` — **this design cannot produce long, slowly-decaying feedback trails via the erase channel alone**; trails from the erase stage are always short (2–3 frames), and for most of the `erasetransparency` control's range (`a≈0.8–0.9`) they're even shorter, with the erase becoming a near-hard clear (`a→1`) only at the extreme top of the knob. Any longer-lived "infinite echo" look in Feedbax therefore has to come from the geometric transform feedback (rotate/zoom accumulating structure across frames), not from slow erase decay — important for a port that wants to reproduce the exact character: **clamp your erase alpha to [0.8, 1.0], don't let it go lower.**
+**Which erase the port must implement — the retrofit changed it.** Since the Max 9 retrofit (`docs/diagnosis-2026-08-23.md`), the loop's render target is a `jit.gl.node @name fb @capture 1`, and `pak erase_color`[obj-56] feeds **that node's** `erase_color`, not `jit.gl.render`[obj-49] (whose own `@erase_color 0 0 0 1.` is now static). A `jit.gl.node`'s erase is a **hard clear of its FBO to `erase_color`, RGB and alpha** — nothing of the previous frame survives the erase; persistence comes entirely from the feedback plane (§3) redrawing the captured previous frame. `erasetransparency` therefore only sets the destination alpha of pixels nothing draws on, and because the plane composites with `(SRC_ALPHA, DST_ALPHA)` over an RGB-black clear, it has **no effect on loop gain**. A port must clear hard: `framebuffer = vec4(erase.rgb, eraseAlpha)`.
+
+Do **not** implement the residual described in the next paragraph. Combined with the plane's additive `(SRC_ALPHA, DST_ALPHA)` composite, a `(1−a)` residual of the previous frame is *added to* the redrawn warped copy rather than blended under it, so per-frame retention becomes `1 + A_dst·(1−a)` — above unity for every `a<1`. The port's first implementation did exactly this, and a mid-grey field with no content at all climbed to clipped white by frame 30 at `a≈0.92` (measured, `LoopStabilityTests.testRetentionWithoutInjectionNeverExceedsUnityAcrossEraseValues`). The loop's only loss terms are the HSL lightness delta (§4) and content transported off-frame; the erase is not one of them.
+
+**What the gl2-era erase did (historical; pre-retrofit `jit.gl.render` path only):** `erase` with `erase_color` alpha `a<1` and blending on draws a translucent black quad over the previous frame instead of clearing it. A pixel's contribution from `n` frames ago survives at `(1-a)^n` of its original value (each tick multiplies the residual by `(1-a)`). Because `a` never goes below **0.8**, the residual after one frame is at most `0.2`, after two frames at most `0.04`, after three frames at most `0.008` — **this design cannot produce long, slowly-decaying feedback trails via the erase channel alone**; trails from the erase stage are always short (2–3 frames), and for most of the `erasetransparency` control's range (`a≈0.8–0.9`) they're even shorter, with the erase becoming a near-hard clear (`a→1`) only at the extreme top of the knob. Any longer-lived "infinite echo" look in Feedbax therefore has to come from the geometric transform feedback (rotate/zoom accumulating structure across frames), not from slow erase decay. Whether the gl2 path's residual ever actually reached the composite as a gain term (a default gl2 window framebuffer without alpha planes would have read `A_dst = 1`, making the residual purely additive as analysed above) is not recoverable from the listing; the retrofit patch is the reference now, and it clears hard.
 
 The starting/default value of `erasetransparency` itself is set by `feedbax.webui` (not in these two files) — **[?] unknown default**.
 
@@ -298,13 +313,16 @@ color.rgb = hsl2rgb(hsl);
 // loadmess'd pak that always fires at load — see §3.
 drawFullscreenQuad(color, blendFunc = (SRC_ALPHA, DST_ALPHA));  // NOT standard alpha-over, §3
 
-// --- Stage 4: partial erase, THEN capture for next frame ---
-framebuffer = mix(framebuffer, vec4(0,0,0,1), eraseAlpha);  // done BEFORE stage 1-3 draw each tick (§1 order)
+// --- Stage 4: HARD erase, THEN capture for next frame ---
+// jit.gl.node clears its FBO to erase_color (rgb AND alpha) — no residual of the
+// previous frame. Done BEFORE stages 1-3 draw each tick (§1 order). See §2: a
+// mix()/residual erase here, under the additive composite of stage 3, is a gain > 1.
+framebuffer = vec4(0, 0, 0, eraseAlpha);
 // ... draw stages 1-3 into framebuffer ...
 feedbackTexture = captureFramebuffer();  // "to_texture", fires LAST each tick (§1)
 ```
 
-What actually produces the Feedbax "look," in priority order: (1) the fold/mirror boundmode on the rotate/zoom stage compounding structure at the edges every frame, far more than the erase does; (2) rotate+zoom about a fixed center anchor, both smoothed over ~100ms so changes glide rather than snap; (3) additive per-frame hue drift that wraps into slow rainbow cycling; (4) a short (2–3 frame), never-fully-transparent erase that prevents infinite ghosting but keeps edges soft; (5) a non-standard `(src_alpha, dst_alpha)` blend on the final composite, which can brighten rather than cleanly dissolve; (6) confirmed loss of horizontal mirroring at runtime (§3) despite the plane's mirrored creation attribute — `scale.x` ends up `+1.78`, not `-1.78`.
+What actually produces the Feedbax "look," in priority order: (1) the fold/mirror boundmode on the rotate/zoom stage compounding structure at the edges every frame, far more than the erase does; (2) rotate+zoom about a fixed center anchor, both smoothed over ~100ms so changes glide rather than snap; (3) additive per-frame hue drift that wraps into slow rainbow cycling; (4) an erase that is a hard clear (post-retrofit) — persistence and its decay come from the plane redraw plus the HSL lightness delta, not from the erase; (5) a non-standard `(src_alpha, dst_alpha)` blend on the final composite, which can brighten rather than cleanly dissolve; (6) confirmed loss of horizontal mirroring at runtime (§3) despite the plane's mirrored creation attribute — `scale.x` ends up `+1.78`, not `-1.78`.
 
 ---
 

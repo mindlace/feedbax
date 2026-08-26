@@ -5,6 +5,23 @@
 
 # Audio input, analysis, waveform drawing and audio-reactive modulation (sound2)
 
+> **Corrections (2026-08-24, evening; evidence in
+> `docs/superpowers/specs/2026-08-24-dynamism-gap-diagnosis.md`):**
+> * §5 line "radial … toggle[241] → prepend radial[239] (forced)" and the §8/§10 rows that
+>   repeat it: that chord goes to **obj-213 (waveform 2)**, not obj-12. Waveform 1 is a
+>   **linear** graph (`line_width 12`, `scale 1.5 1 0`, `position 0 −0.85 0`); waveform 2 is
+>   the **ring** (`radial 1`, `radialradius 0.7` from `loadmess 0.7 → slider[329]`,
+>   `line_width 4`, `position 0 0 −2`).
+> * Waveform 2 **draws at load**: `soundwave_enable1` (the "Circle" box) has no loadmess and
+>   `jit.gl.graph` enables by default. Its base alpha is 0.8 (`loadmess 0.8 → slider[338]`).
+> * §3: `gswitch`[126] is a **message** object (refpage inlets `bang/int`), so `*~ -0.5`[128]'s
+>   cold inlet is not signal-rate and the −0.5 argument is in force; wave 2 is not structurally
+>   silent. `downsample 512` (`loadmess 512 → s wave2cmd`) **averages** each group of 512
+>   samples (jit.catch~ refpage), so the 60 Hz band is nearly flattened — the ring is
+>   near-static for that reason.
+> * §7a: `worldBump`'s multiplier is `* 0.8` with its right inlet set by `loadmess 0.05` →
+>   effective **0.05**; gated by toggle[15] `wordBumpEn` (no saved state → off).
+
 Source: `feedbax.sound2.maxpat` (top patcher: 348 boxes / 341 lines), instantiated once in the main patch as `[obj-150] feedbax.sound2` (io=1/2). Object ids below (`obj-N`) refer to `feedbax.sound2` unless a file name prefixes them (e.g. `Feedbax.obj-146`).
 
 ## 0. One-clause glossary for objects used only in this file

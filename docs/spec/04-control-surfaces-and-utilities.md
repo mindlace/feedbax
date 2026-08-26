@@ -5,6 +5,13 @@
 
 # Control surfaces (iPad/Mira, on-screen UI, Leap Motion) and utilities
 
+> **Correction (2026-08-24, evening):** the webUI faders `slider[2]` BRIGHTNESS, `slider[5]`
+> HUE-SHIFT, `slider[8]` ZOOM and `slider[7]` rotate are `size 2, min −1` widgets: the value
+> SENT is `internal − 1`, and the number boxes / `parameter_initial` values (1., 1.1, 0.75,
+> 0.739) are internal. So the reset burst sets BRIGHTNESS → raw 0.0 and HUE-SHIFT → raw 0.1
+> (not out-of-range), and ZOOM 0.75 / rotate 0.739 are raw −0.25 / +0.261 (before rotate's
+> `* -1.`), matching the measured startup vector. SATURATION and TRANSPARANCY are `size 1`.
+
 Five small patcher files carry the "performance layer": **feedbax.webui** (the Mira-hosted iPad UI plus a bank of debug/manual sliders), **feedbax.leapgemini** (Ultraleap hand tracking), **feedbax.pathsetup** (portable-path bootstrap), **feedbax.misc** (one global constant broadcaster), and **feedbax.stillsave** (screenshot). All five are called from `Feedbax.maxpat` as argument-less abstractions (`io=0/0`), i.e. they communicate with the rest of the patch **only** through global send/receive (`s`/`r`) buses — there is no patch-cord data path into or out of them from the main patch. Mira (`mira.frame`, `mira.multitouch`, `mira.mt.*`, `mira.motion`) is Cycling '74's iPad-mirroring add-on: it renders a subset of a patcher's UI on an iPad over the network and turns iPad touches into normal Max messages.
 
 ## 0. Bus inventory relevant to this section (from the cross-reference)

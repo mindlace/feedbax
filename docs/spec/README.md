@@ -53,8 +53,10 @@ plane's depth and on a waveform's alpha).
 
 ```
 every tick of metro (60 Hz default; presets 30/60/90/100/120):
-  1. render.erase                     # erase_color = (0,0,0,a), a = 0.8 + 0.2·t³, t = erasetransparency∈[0,1]
-                                      #   with blending on, this fades the old frame to (1−a) instead of clearing it
+  1. fb.erase                         # erase_color = (0,0,0,a), a = 0.8 + 0.2·3^(t−1), t = erasetransparency∈[0,1]
+                                      #   (classic-mode scale, measured; §01 §2). Post-retrofit the target is the
+                                      #   jit.gl.node `fb`, whose erase is a HARD clear — no (1−a) residual. A port
+                                      #   that keeps a residual under the additive plane composite (step 5) has gain > 1.
   2. bang feedbackTexture             # fst (full res, fullscreen) or dst (320×180, windowed) → emits its texture ref
        → shaderfx:  tex = td_rota(tex; zoom, theta, offset, anchor=(.5,.5), boundmode=4 (mirror-fold))
                     tex = hsl_shift(tex; +hue_shift, +sat_delta, +light_delta)
