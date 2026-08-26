@@ -100,10 +100,7 @@ public final class EngineHost {
   /// ordering is the point (spec goal 2).
   public func start() {
     guard driver == nil else { return }
-    installDriver { [weak self] gen, tick in
-      guard let self else { return nil }
-      return self.factory.makeWindowless(rate: self.engine.frameRate, tick: tick)
-    }
+    installDriver { self.factory.makeWindowless(rate: self.engine.frameRate, tick: $0) }
   }
 
   /// The output window opened (or moved to a new screen and rebuilt its layer). Swaps to a
@@ -111,10 +108,7 @@ public final class EngineHost {
   public func attach(_ target: RenderTarget) {
     self.target = target
     self.targetID = ObjectIdentifier(target)
-    installDriver { [weak self] gen, tick in
-      guard let self else { return nil }
-      return self.factory.makeDisplayLinked(target: target, rate: self.engine.frameRate, tick: tick)
-    }
+    installDriver { self.factory.makeDisplayLinked(target: target, rate: self.engine.frameRate, tick: $0) }
   }
 
   /// The output window closed. Swaps back to the timer so the loop keeps evolving. A detach
@@ -125,17 +119,22 @@ public final class EngineHost {
     guard targetID == ObjectIdentifier(target) else { return }
     self.target = nil
     self.targetID = nil
-    installDriver { [weak self] gen, tick in
-      guard let self else { return nil }
-      return self.factory.makeWindowless(rate: self.engine.frameRate, tick: tick)
-    }
+    installDriver { self.factory.makeWindowless(rate: self.engine.frameRate, tick: $0) }
   }
 
-  private func installDriver(_ build: (Int, @escaping (FrameTick) -> Void) -> FrameDriver?) {
+  /// `build` runs synchronously and non-escaping — it's called exactly once, right here, so
+  /// there is no "self is already gone" case to guard against and no need for it to return an
+  /// optional (a prior version threaded a `gen` parameter to `build` and let it return
+  /// `FrameDriver?`, but nothing read `gen` and a `nil` return would have gone unhandled,
+  /// silently leaving `driver` nil and the engine un-driven — dead code final review flagged).
+  /// The `tick` closure passed to `build` DOES escape (the driver holds it for its lifetime),
+  /// which is exactly why that one still needs `[weak self]` and the generation check: a driver
+  /// invalidated mid-flight can still deliver one last tick after a newer driver has taken over.
+  private func installDriver(_ build: (@escaping (FrameTick) -> Void) -> FrameDriver) {
     driver?.invalidate()
     generation &+= 1
     let gen = generation
-    driver = build(gen) { [weak self] tick in
+    driver = build { [weak self] tick in
       guard let self, gen == self.generation else { return }
       self.renderFrame(tick)
     }

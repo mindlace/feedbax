@@ -28,19 +28,18 @@ public protocol FrameDriver: AnyObject {
   func invalidate()
 }
 
-/// The windowless clock. Delivers on `queue` (main by default) because `Engine.step` and
-/// `ControlRouter.tick` are main-thread-only by convention throughout this codebase.
+/// The windowless clock. Delivers on the main queue, unconditionally — no `queue` parameter to
+/// pick another, because `Engine.step` and `ControlRouter.tick` are main-thread-only by
+/// convention throughout this codebase and every driver must tick on main.
 public final class TimerDriver: FrameDriver {
   public private(set) var rate: Int
-  private let queue: DispatchQueue
   private let tick: (FrameTick) -> Void
   private var timer: DispatchSourceTimer?
 
-  public init(rate: Int, queue: DispatchQueue = .main, tick: @escaping (FrameTick) -> Void) {
+  public init(rate: Int, tick: @escaping (FrameTick) -> Void) {
     // A zero or negative rate would make the repeat interval infinite (or negative) and the
     // engine would silently stop evolving — the exact failure this driver exists to prevent.
     self.rate = max(rate, 1)
-    self.queue = queue
     self.tick = tick
     schedule()
   }
@@ -48,7 +47,7 @@ public final class TimerDriver: FrameDriver {
   private func schedule() {
     timer?.cancel()
     let interval = 1.0 / Double(rate)
-    let source = DispatchSource.makeTimerSource(queue: queue)
+    let source = DispatchSource.makeTimerSource(queue: .main)
     // Leeway is a power hint, not slop we care about: nothing downstream reads wall-clock
     // deltas from this driver (`EngineHost` stamps its own `CACurrentMediaTime`).
     source.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(1))
