@@ -97,6 +97,41 @@ final class EngineHostTests: XCTestCase {
     XCTAssertEqual(host.frameCount, 1, "engine keeps stepping after the window closes")
   }
 
+  /// `RenderView.deinit { host.detach(self) }` is the backstop for a teardown path that never
+  /// runs `viewDidMoveToWindow(nil)` first. `EngineHost.target` is `weak`, and Swift zeroes a
+  /// weak reference to an object as soon as that object's OWN `deinit` begins — so this proves
+  /// `detach` still recognizes the deallocating target (via the `ObjectIdentifier` snapshot,
+  /// not the now-nil weak reference) and swaps back to the windowless driver, rather than
+  /// silently leaving the display-linked driver ticking forever against a dead target.
+  func testDetachBackstopFiresWhenTheTargetItselfDeallocates() throws {
+    final class DeinitDetachingTarget: RenderTarget {
+      let metalLayer = CAMetalLayer()
+      var drawableSizePixels = SIMD2(320, 240)
+      var hostingWindow: NSWindow? { nil }
+      let host: EngineHost
+      init(host: EngineHost) { self.host = host }
+      deinit { host.detach(self) }
+    }
+
+    let factory = FakeDriverFactory()
+    let host = try makeHost(factory)
+    host.start()
+
+    func attachAndDrop() {
+      let target = DeinitDetachingTarget(host: host)
+      host.attach(target)
+    }
+    attachAndDrop()
+
+    XCTAssertFalse(host.isAttached,
+                    "the deinit backstop must detach even though the weak `target` is already nil")
+    XCTAssertTrue(factory.displayLinked[0].invalidated, "the display-linked driver must be torn down")
+    XCTAssertEqual(factory.windowless.count, 2, "a fresh windowless driver takes over")
+
+    factory.windowless[1].fire()
+    XCTAssertEqual(host.frameCount, 1, "engine keeps stepping after the backstop detach")
+  }
+
   func testDetachOfAStaleTargetIsIgnored() throws {
     let factory = FakeDriverFactory()
     let host = try makeHost(factory)

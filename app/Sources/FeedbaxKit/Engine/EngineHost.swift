@@ -53,6 +53,14 @@ public final class EngineHost {
   private let factory: FrameDriverFactory
   private var driver: FrameDriver?
   private weak var target: RenderTarget?
+  /// Snapshot of `target`'s identity, taken in `attach` and cleared in `detach`. `target` itself
+  /// is `weak` and Swift zeroes a weak reference to an object as soon as that object's OWN
+  /// `deinit` begins — so a `detach(self)` called from inside a `RenderTarget`'s `deinit` (the
+  /// backstop for a teardown path that skips `viewDidMoveToWindow(nil)`) would otherwise compare
+  /// `self.target` (already nil) against the deiniting instance and silently no-op, never
+  /// swapping back to the windowless driver. Comparing `ObjectIdentifier`s instead survives that
+  /// zeroing, because the id is computed from `self` before `target` is read at all.
+  private var targetID: ObjectIdentifier?
   private var lastFrameTimestamp: CFTimeInterval?
 
   /// Bumped on every driver swap and captured by the tick closure handed to each driver. A
@@ -102,6 +110,7 @@ public final class EngineHost {
   /// vsync-locked driver bound to that window's display.
   public func attach(_ target: RenderTarget) {
     self.target = target
+    self.targetID = ObjectIdentifier(target)
     installDriver { [weak self] gen, tick in
       guard let self else { return nil }
       return self.factory.makeDisplayLinked(target: target, rate: self.engine.frameRate, tick: tick)
@@ -113,8 +122,9 @@ public final class EngineHost {
   /// AFTER the new one has been set up, so an unguarded detach would kill a freshly attached
   /// window's driver.
   public func detach(_ target: RenderTarget) {
-    guard self.target === target else { return }
+    guard targetID == ObjectIdentifier(target) else { return }
     self.target = nil
+    self.targetID = nil
     installDriver { [weak self] gen, tick in
       guard let self else { return nil }
       return self.factory.makeWindowless(rate: self.engine.frameRate, tick: tick)

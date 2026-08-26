@@ -30,12 +30,15 @@ let bootstrap: AppBootstrap = {
 // TEMPORARY (Task 3): `AppBootstrap.host` doesn't exist yet — Task 5 moves this into
 // `AppBootstrap` and deletes this local build.
 let host: EngineHost = {
-  do { return try EngineHost(engine: bootstrap.engine) } catch {
+  do {
+    let h = try EngineHost(engine: bootstrap.engine)
+    h.start()
+    return h
+  } catch {
     FileHandle.standardError.write(Data("Feedbax: failed to start the renderer: \(error)\n".utf8))
     exit(1)
   }
 }()
-host.start()
 
 /// `DisplayView` + `OperatorPanel` side by side (Task 20's "panel beside PreviewView in an
 /// HSplitView"), identical to `feedbax-dev/main.swift`'s `ContentView`.

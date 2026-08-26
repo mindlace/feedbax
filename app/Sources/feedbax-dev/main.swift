@@ -225,12 +225,15 @@ do {
 // TEMPORARY (Task 3): `AppBootstrap.host` doesn't exist yet — Task 5 moves this into
 // `AppBootstrap` and deletes this local build.
 let host: EngineHost = {
-  do { return try EngineHost(engine: bootstrap.engine) } catch {
+  do {
+    let h = try EngineHost(engine: bootstrap.engine)
+    h.start()
+    return h
+  } catch {
     FileHandle.standardError.write(Data("Feedbax: failed to start the renderer: \(error)\n".utf8))
     exit(1)
   }
 }()
-host.start()
 
 /// `swift run`'s unbundled executable has no Info.plist/nib, so — unlike a proper `.app`
 /// bundle (Task 23) — nothing makes this process the frontmost, regular, focusable app on its
