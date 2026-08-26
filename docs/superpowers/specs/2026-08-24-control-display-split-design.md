@@ -1,6 +1,6 @@
 # Control/Display Split — Design
 
-**Status:** draft for review
+**Status:** implemented 2026-08-25 (docs/superpowers/plans/2026-08-25-control-display-split.md)
 **Date:** 2026-08-24
 
 ## Problem
@@ -99,17 +99,33 @@ today it is built with `try?` and silently disables rendering forever if it
 throws (`PreviewView.swift:100` + `:129`). Moving it up is the chance to make
 that failure loud instead of silent.
 
+`RenderView` tracks its hosting window's `isVisible` via KVO, not the window's
+lifecycle: a SwiftUI `Window` scene hides its window on close rather than
+deallocating it, so a lifecycle-based attach/detach would never fire again
+once the window was manually reopened, defeating goal 2 entirely.
+
 ### Input
 
 Input moves from the render view to an app-level `NSEvent` local monitor
-installed by `EngineHost`, forwarding `keyDown`/`keyUp`/`flagsChanged`/
-`scrollWheel`/`magnify` to `KeyboardTrackpadSurface`. That is goal 4: focus
-stops mattering.
+(`PerformerInputMonitor`), forwarding `keyDown`/`scrollWheel`/`magnify`/
+option-held `leftMouseDragged` to `KeyboardTrackpadSurface`. That is goal 4:
+focus stops mattering.
 
-**Care needed:** a local monitor sees events destined for the control panel's own
-text fields. The monitor must pass events through untouched when the first
-responder is an `NSText`-family view, or typing a preset name will trigger
-keyboard bindings.
+The monitor finds the output window through the attached render target
+(`EngineHost.attachedWindow`), not by `NSWindow.identifier` — the output
+window doesn't exist yet when the monitor is constructed at bootstrap, and a
+SwiftUI `Window` scene's `id` landing on the AppKit window's `identifier`
+isn't a contract worth depending on.
+
+**Care needed:** a local monitor sees every keydown in the app, including ones
+destined for the control panel's own text fields. Keys are consumed (forwarded
+and swallowed) only when they are actually bound to something AND no
+Command/Control modifier is held — an unbound key, a text-field keystroke, or
+a chorded menu/window shortcut passes through untouched, or ordinary app
+shortcuts and keyboard navigation of the control panel break. Pointer gestures
+(scroll, magnify, option-drag) forward only when they originate in the Output
+window, so the Controls panel — a scrollable form of sliders — stays
+scrollable rather than panning the shader.
 
 ## Fix carried along
 
@@ -145,9 +161,7 @@ verified by hand, not by tests.
 
 ## Open question
 
-Whether `TimerDriver` should run at full `engine.frameRate` when nothing is
-being displayed, or throttle. Full rate keeps the feedback evolution
-time-accurate — the image you get back on reopening is the one you would have
-had. Throttling saves GPU but makes the loop's evolution depend on whether
-anyone was watching, which for a feedback instrument is a behavioral change, not
-an optimization. Recommend full rate.
+**Resolved:** `TimerDriver` runs at the full `engine.frameRate` when nothing is
+attached. Throttling would make the loop's evolution depend on whether anyone
+was watching, which for a feedback instrument is a behavioral change, not an
+optimization.
