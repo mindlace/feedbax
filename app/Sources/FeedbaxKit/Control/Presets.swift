@@ -252,25 +252,34 @@ public final class PresetStore {
                  toggles: toggles, layers: presetLayers)
   }
 
-  /// Recalls a preset: the 9-slot control vector goes through `router.apply` — ramped, same
-  /// glide a performer's own gesture would get (design §5 Presets: recall glides, it doesn't
-  /// snap) — while `eraseControl`, layer transforms, and layer settings are set directly.
-  /// Erase is never ramped in the original (spec §01 §2) and isn't a `ControlWrite` slot;
-  /// transforms/settings are a performer-authored placement fact, not a live gesture, so
-  /// there's no glide to reproduce for them either.
+  /// Recalls a preset: the 9-slot control vector AND the layer placement both go through
+  /// `router.apply` — ramped, same glide a performer's own gesture would get (design §5
+  /// Presets: recall glides, it doesn't snap); only `eraseControl` and layer settings are set
+  /// directly. Erase is never ramped in the original (spec §01 §2) and isn't a `ControlWrite`
+  /// slot; settings (z-order/enable) are a discrete on/off fact, not a gesture, so there's no
+  /// glide to reproduce for them.
   public static func apply(_ preset: Preset, router: ControlRouter, layers: [SeedSource],
                            at time: TimeInterval) {
     var slots: [ControlSlot: Float] = [:]
     for slot in ControlSlot.allCases {
       slots[slot] = preset.slots[slot.rawValue]
     }
-    router.apply(ControlWrite(slots: slots, toggles: preset.toggles.toggleEvents()), at: time)
+    // Layer placement recalls THROUGH the router's layer channel — ramped, the same glide the
+    // 9 slots get (design §4) — not by writing `layer.transform` directly: `Engine.step` puts
+    // `router.layerTransform` on both sources every frame, so a direct write would be
+    // overwritten on the next tick. Both sources move in lockstep, so the sticker layer's
+    // saved transform is the one that counts; a preset whose two layers disagree recalls the
+    // sticker's (or, failing that, whichever layer comes first).
+    var layer: [LayerAxis: Float] = [:]
+    if let placement = preset.layers.first(where: { $0.id == "sticker" }) ?? preset.layers.first {
+      layer = ControlRouter.rawLayer(from: placement.transform)
+    }
+    router.apply(ControlWrite(slots: slots, layer: layer, toggles: preset.toggles.toggleEvents()), at: time)
     router.eraseControl = preset.eraseControl
 
     let layersByID = Dictionary(uniqueKeysWithValues: layers.map { ($0.id, $0) })
     for presetLayer in preset.layers {
       guard let layer = layersByID[presetLayer.id] else { continue }
-      layer.transform = presetLayer.transform
       layer.layer = presetLayer.settings
       // Filters: no-op for the same reason `capture` can't snapshot them — SeedSource
       // doesn't expose a filter chain yet. Once it does, restore each with
