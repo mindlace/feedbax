@@ -271,12 +271,17 @@ an unbound gesture+modifier combination is never swallowed.
 ### 6.6 Where the file lives: `BindingsStore`
 
 Pad reassignment persists, and "the bindings table is data" only means something if the data
-can be edited without a rebuild. `BindingsStore` resolves, in order:
-`~/Library/Application Support/Feedbax/Bindings.json` → the bundled `DefaultBindings.json`.
-`save(_:)` writes the user file (creating the directory), round-tripping the whole `Bindings`
-struct — `Bindings` already encodes. Only pad assignments write today; a hand-edited key or
-gesture table in that file is preserved by the round trip. Bindings are read once at
-bootstrap; hot reload while running stays out of scope.
+can be edited without a rebuild. `BindingsStore` loads the bundled `DefaultBindings.json` and
+then applies `~/Library/Application Support/Feedbax/Bindings.json` over it as an **overlay**
+(`BindingsOverlay`: `version`, plus any subset of `pads` / `keys` / `trackpad`) — each section
+the user file supplies replaces the bundled one wholesale, and every section it omits keeps
+flowing from the app, so later fixes to the bundled defaults still reach a performer who has
+already reassigned a pad. `save` writes back the pads plus **only** the sections the user file
+itself already carried, so a hand-authored venue file keeps its hand-authored sections while a
+pads-only file stays pads-only. The write is `.atomic`, and a user file that exists but fails
+to decode is a loud startup failure, never a silent fallback. A full-table file written by the
+older `save` is just an overlay with every section present — it needs no migration. Bindings
+are read once at bootstrap; hot reload while running stays out of scope.
 
 ## 7. XY pads in the Controls window
 

@@ -60,7 +60,7 @@ Press `?` (or Help › Feedbax Controls, ⌘/) inside the app for the live refer
 | Pinch | Zoom | Image scale | Saturation |
 | Twist | Rotate | Image rotate | — |
 
-**Pads:** two XY pads in the Controls window, each assignable to any two axes (default: pad 1 = image X/Y, pad 2 = pan X/Y — the original's two Mira pads). Assignments persist in `~/Library/Application Support/Feedbax/Bindings.json`, which also holds the key and gesture tables and can be hand-edited (version 2).
+**Pads:** two XY pads in the Controls window, each assignable to any two axes (default: pad 1 = image X/Y, pad 2 = pan X/Y — the original's two Mira pads). Assignments persist in `~/Library/Application Support/Feedbax/Bindings.json`, which can also hold hand-edited `keys`/`trackpad` sections that override the bundled defaults (version 2). That file is an overlay, not a copy: only the sections it actually contains override the app's, so improvements to the bundled table keep reaching you.
 
 **Gamepad:** left stick pan, right stick hue/brightness, triggers zoom/rotate, d-pad erase and saturation, A/B/X/Y SInvert/layer/wave 1/wave 2, Menu fullscreen.
 

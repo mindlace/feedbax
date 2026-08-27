@@ -132,50 +132,84 @@ public struct Bindings: Equatable {
   public static let fallback = Bindings(version: currentVersion, keys: [:], trackpad: [], pads: defaultPads)
 }
 
+/// The section-level codec rules, shared by `Bindings`' own `Codable` (below) and
+/// `BindingsOverlay`'s (`BindingsStore.swift`). Two files decode the same sections, so the
+/// rules live in exactly one place: a validation that only the full-table codec enforced would
+/// be a hole an overlay could walk straight through.
+///
+/// Generic over `K: CodingKey` only so each caller can report the failure against its OWN
+/// `CodingKeys` case and get the real coding path in the error a performer sees.
+extension Bindings {
+  static func checkVersion<K: CodingKey>(_ version: Int, forKey key: K,
+                                         in c: KeyedDecodingContainer<K>) throws {
+    guard version != Bindings.currentVersion else { return }
+    throw DecodingError.dataCorruptedError(
+      forKey: key, in: c,
+      debugDescription: "Bindings version \(version) is not supported (this build reads version \(Bindings.currentVersion))")
+  }
+
+  /// `{"i": "sInvert"}` → `["i": .sInvert(true)]`, rejecting any marker `ToggleEvent` doesn't
+  /// know. The Bool is a placeholder; `KeyboardTrackpadSurface` resolves it against live truth.
+  static func toggleEvents<K: CodingKey>(fromMarkers raw: [String: String], forKey key: K,
+                                         in c: KeyedDecodingContainer<K>) throws -> [String: ToggleEvent] {
+    var resolved: [String: ToggleEvent] = [:]
+    for (name, marker) in raw {
+      guard let event = ToggleEvent.fromMarker(marker) else {
+        throw DecodingError.dataCorruptedError(
+          forKey: key, in: c, debugDescription: "Unknown toggle marker '\(marker)' for key '\(name)'")
+      }
+      resolved[name] = event
+    }
+    return resolved
+  }
+
+  static func markers(from keys: [String: ToggleEvent]) -> [String: String] {
+    Dictionary(uniqueKeysWithValues: keys.map { ($0.key, $0.value.marker) })
+  }
+
+  /// Two rows for the same (gesture, modifiers) would make `trackpadBinding(for:)` silently
+  /// pick the first — reject the file instead so the edit that caused it gets noticed.
+  static func rejectDuplicateRows<K: CodingKey>(_ rows: [TrackpadBinding], forKey key: K,
+                                                in c: KeyedDecodingContainer<K>) throws {
+    var seen: Set<String> = []
+    for row in rows {
+      let id = row.gesture.rawValue + ":" + row.modifiers.map(\.rawValue).sorted().joined(separator: "+")
+      guard seen.insert(id).inserted else {
+        throw DecodingError.dataCorruptedError(
+          forKey: key, in: c, debugDescription: "Duplicate trackpad row for \(id)")
+      }
+    }
+  }
+
+  static func requireTwoPads<K: CodingKey>(_ pads: [PadAssignment], forKey key: K,
+                                           in c: KeyedDecodingContainer<K>) throws {
+    guard pads.count != 2 else { return }
+    throw DecodingError.dataCorruptedError(
+      forKey: key, in: c, debugDescription: "Exactly two pads are expected, found \(pads.count)")
+  }
+}
+
 extension Bindings: Codable {
-  private enum CodingKeys: String, CodingKey { case version, keys, trackpad, pads }
+  /// Shared with `BindingsOverlay`, which decodes the same four section names — an overlay is
+  /// this same shape with every section but `version` optional.
+  enum CodingKeys: String, CodingKey { case version, keys, trackpad, pads }
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     version = try c.decode(Int.self, forKey: .version)
-    guard version == Bindings.currentVersion else {
-      throw DecodingError.dataCorruptedError(
-        forKey: .version, in: c,
-        debugDescription: "Bindings version \(version) is not supported (this build reads version \(Bindings.currentVersion))")
-    }
-    let rawKeys = try c.decode([String: String].self, forKey: .keys)
-    var resolved: [String: ToggleEvent] = [:]
-    for (key, marker) in rawKeys {
-      guard let event = ToggleEvent.fromMarker(marker) else {
-        throw DecodingError.dataCorruptedError(
-          forKey: .keys, in: c, debugDescription: "Unknown toggle marker '\(marker)' for key '\(key)'")
-      }
-      resolved[key] = event
-    }
-    keys = resolved
+    try Bindings.checkVersion(version, forKey: .version, in: c)
+    keys = try Bindings.toggleEvents(fromMarkers: try c.decode([String: String].self, forKey: .keys),
+                                     forKey: .keys, in: c)
     trackpad = try c.decode([TrackpadBinding].self, forKey: .trackpad)
-    // Two rows for the same (gesture, modifiers) would make `trackpadBinding(for:)` silently
-    // pick the first — reject the file instead so the edit that caused it gets noticed.
-    var seen: Set<String> = []
-    for row in trackpad {
-      let key = row.gesture.rawValue + ":" + row.modifiers.map(\.rawValue).sorted().joined(separator: "+")
-      guard seen.insert(key).inserted else {
-        throw DecodingError.dataCorruptedError(
-          forKey: .trackpad, in: c, debugDescription: "Duplicate trackpad row for \(key)")
-      }
-    }
+    try Bindings.rejectDuplicateRows(trackpad, forKey: .trackpad, in: c)
     pads = try c.decode([PadAssignment].self, forKey: .pads)
-    guard pads.count == 2 else {
-      throw DecodingError.dataCorruptedError(
-        forKey: .pads, in: c, debugDescription: "Exactly two pads are expected, found \(pads.count)")
-    }
+    try Bindings.requireTwoPads(pads, forKey: .pads, in: c)
   }
 
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: CodingKeys.self)
     try c.encode(version, forKey: .version)
-    let rawKeys = Dictionary(uniqueKeysWithValues: keys.map { ($0.key, $0.value.marker) })
-    try c.encode(rawKeys, forKey: .keys)
+    try c.encode(Bindings.markers(from: keys), forKey: .keys)
     try c.encode(trackpad, forKey: .trackpad)
     try c.encode(pads, forKey: .pads)
   }
