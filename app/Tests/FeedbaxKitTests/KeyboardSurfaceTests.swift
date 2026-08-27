@@ -90,8 +90,14 @@ final class KeyboardSurfaceTests: XCTestCase {
 
   func testModifiersSelectTheTargetAndSensitivityScales() throws {
     let s = try surface()
+    // Task 5: pinch and rotate are both lock-managed two-finger gestures (GestureLock), so —
+    // unlike the one-finger drag below — each needs its own `.ended` before the next begins;
+    // otherwise the pinch that claims the lock on its first event never releases it, and the
+    // rotate below would be discarded outright regardless of its own delta.
     s.gesture(GestureEvent(gesture: .pinch, modifiers: [.option], dx: 0.2))
+    s.gesture(GestureEvent(gesture: .pinch, modifiers: [.option], phase: .ended, dx: 0))
     s.gesture(GestureEvent(gesture: .rotate, dx: 0.25))
+    s.gesture(GestureEvent(gesture: .rotate, phase: .ended, dx: 0))
     s.gesture(GestureEvent(gesture: .drag, modifiers: [.shift], dx: 0.1, dy: -0.2))
     let w = s.poll(0)!
     XCTAssertEqual(w.layer[.scale]!, 0.2, accuracy: 1e-6, "Option-pinch → image scale")
@@ -107,5 +113,19 @@ final class KeyboardSurfaceTests: XCTestCase {
     XCTAssertTrue(s.handles(.rotate, modifiers: [.option]))
     s.gesture(GestureEvent(gesture: .rotate, modifiers: [.shift], dx: 0.5))
     XCTAssertNil(s.poll(0))
+  }
+
+  /// Spec §6.3 end to end: a twist that leaks pinch deltas moves rotate only.
+  func testATwistThatLeaksPinchDeltasMovesRotateOnly() throws {
+    let s = try surface()
+    s.gesture(GestureEvent(gesture: .rotate, phase: .began, dx: 0))
+    s.gesture(GestureEvent(gesture: .pinch, phase: .began, dx: 0))
+    for _ in 0..<5 {
+      s.gesture(GestureEvent(gesture: .rotate, dx: 3.0 / 180))   // 15° total, past 5°
+      s.gesture(GestureEvent(gesture: .pinch, dx: 0.01))         // 0.05 total — would also pass alone
+    }
+    let w = s.poll(0)!
+    XCTAssertNotNil(w.slots[.theta])
+    XCTAssertNil(w.slots[.zoom], "pinch was discarded once rotate claimed the sequence")
   }
 }

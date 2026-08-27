@@ -46,6 +46,10 @@ public final class KeyboardTrackpadSurface: ControlSurface {
 
   private static let eraseStepMagnitude: Float = 0.05
 
+  /// Arbitrates between simultaneously-delivered two-finger gestures (design §6.3, Task 5) —
+  /// see `GestureLock`'s own doc comment for why this needs to exist at all.
+  private var lock = GestureLock()
+
   public init(bindings: Bindings, stateSnapshot: ControlStateSnapshot = .constant(false)) {
     self.bindings = bindings
     self.stateSnapshot = stateSnapshot
@@ -82,6 +86,9 @@ public final class KeyboardTrackpadSurface: ControlSurface {
   /// One normalised gesture event (design §6.4). Unbound → no-op, same as an unbound key.
   public func gesture(_ event: GestureEvent) {
     guard let binding = bindings.trackpadBinding(for: event.gesture, modifiers: event.modifiers) else { return }
+    // Bound gestures only reach the lock — an unbound combination the monitor let through
+    // (or a test fed directly) must not claim a sequence nothing will ever end.
+    guard lock.admit(event) else { return }
     switch binding.target {
     case .xy(let x, let y):
       nudge(event.delta.x, along: x)
