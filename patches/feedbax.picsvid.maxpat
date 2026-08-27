@@ -1891,82 +1891,6 @@
 			},
 			{
 				"box": {
-					"id": "obj-68",
-					"linecount": 3,
-					"maxclass": "message",
-					"numinlets": 2,
-					"numoutlets": 1,
-					"outlettype": [
-						""
-					],
-					"patching_rect": [
-						227.0,
-						451.0,
-						412.0,
-						49.0
-					],
-					"text": "input/transparent-background/"
-				}
-			},
-			{
-				"box": {
-					"fontname": "Arial",
-					"fontsize": 13.0,
-					"id": "obj-56",
-					"maxclass": "comment",
-					"numinlets": 1,
-					"numoutlets": 0,
-					"patching_rect": [
-						235.0,
-						299.0,
-						120.0,
-						21.0
-					],
-					"text": "drop a folder here!"
-				}
-			},
-			{
-				"box": {
-					"id": "obj-63",
-					"maxclass": "dropfile",
-					"numinlets": 1,
-					"numoutlets": 2,
-					"outlettype": [
-						"",
-						""
-					],
-					"patching_rect": [
-						227.0,
-						287.0,
-						134.75,
-						44.5
-					]
-				}
-			},
-			{
-				"box": {
-					"fontface": 0,
-					"fontname": "Arial",
-					"fontsize": 13.0,
-					"id": "obj-5",
-					"maxclass": "newobj",
-					"numinlets": 1,
-					"numoutlets": 2,
-					"outlettype": [
-						"",
-						"int"
-					],
-					"patching_rect": [
-						219.0,
-						352.0,
-						130.0,
-						23.0
-					],
-					"text": "folder"
-				}
-			},
-			{
-				"box": {
 					"id": "obj-298",
 					"maxclass": "comment",
 					"numinlets": 1,
@@ -9033,10 +8957,10 @@
 					"patching_rect": [
 						93.0,
 						252.0,
-						155.0,
+						224.0,
 						22.0
 					],
-					"text": "jit.movie @output_texture 1"
+					"text": "jit.movie @output_texture 1 @drawto foo"
 				}
 			},
 			{
@@ -9894,10 +9818,10 @@
 					"patching_rect": [
 						1148.0,
 						951.0,
-						50.0,
+						116.0,
 						23.0
 					],
-					"text": "jit.grab"
+					"text": "jit.grab @drawto foo"
 				}
 			},
 			{
@@ -13841,32 +13765,6 @@
 					"order": 0,
 					"source": [
 						"obj-62",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-5",
-						0
-					],
-					"order": 1,
-					"source": [
-						"obj-63",
-						0
-					]
-				}
-			},
-			{
-				"patchline": {
-					"destination": [
-						"obj-68",
-						1
-					],
-					"order": 0,
-					"source": [
-						"obj-63",
 						0
 					]
 				}
