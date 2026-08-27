@@ -7,6 +7,7 @@ import SwiftUI
 public enum FeedbaxWindow {
   public static let outputID = "output"
   public static let controlsID = "controls"
+  public static let referenceID = "reference"
 }
 
 /// The launch-time "make sure both windows are open" one-shot (Ruling 11), shared by both
@@ -47,6 +48,11 @@ private struct OutputWindowContent: View {
       .onAppear {
         LaunchWindowOpener.openCompanionOnce { openWindow(id: FeedbaxWindow.controlsID) }
       }
+      // `?` from `PerformerInputMonitor` (design §8.3). Both windows listen; `openWindow` on
+      // an already-open window just focuses it, so two receivers can't fight.
+      .onReceive(NotificationCenter.default.publisher(for: .feedbaxShowControlsReference)) { _ in
+        openWindow(id: FeedbaxWindow.referenceID)
+      }
   }
 }
 
@@ -69,11 +75,39 @@ private struct ControlsWindowContent: View {
       .onAppear {
         LaunchWindowOpener.openCompanionOnce { openWindow(id: FeedbaxWindow.outputID) }
       }
+      // `?` from `PerformerInputMonitor` (design §8.3). Both windows listen; `openWindow` on
+      // an already-open window just focuses it, so two receivers can't fight.
+      .onReceive(NotificationCenter.default.publisher(for: .feedbaxShowControlsReference)) { _ in
+        openWindow(id: FeedbaxWindow.referenceID)
+      }
+  }
+}
+
+/// The app's first custom menu item (design §8.3): Help › Feedbax Controls, ⌘? — the
+/// platform's standard Help shortcut. `CommandGroup(replacing: .help)` swaps out SwiftUI's
+/// default (and inert) "<App> Help" entry. A bare `?` key equivalent would beat text fields
+/// to the keystroke, so the unmodified `?` goes through `PerformerInputMonitor` instead.
+private struct ControlsReferenceCommands: Commands {
+  var body: some Commands {
+    CommandGroup(replacing: .help) {
+      ShowControlsReferenceButton()
+    }
+  }
+}
+
+/// Split out because `openWindow` is an environment value, and environment values are only
+/// readable from a `View` — `Commands` bodies can't read them directly.
+private struct ShowControlsReferenceButton: View {
+  @Environment(\.openWindow) private var openWindow
+
+  var body: some View {
+    Button("Feedbax Controls") { openWindow(id: FeedbaxWindow.referenceID) }
+      .keyboardShortcut("?", modifiers: .command)
   }
 }
 
 /// The instrument's whole window layout, shared verbatim by both entry points so `swift run`
-/// and `Feedbax.app` cannot drift (design §8). Two `Window` scenes rather than `WindowGroup`s:
+/// and `Feedbax.app` cannot drift (design §8). Three `Window` scenes rather than `WindowGroup`s:
 /// `Window` is single-instance and gets a Window-menu entry for free, so a closed window can
 /// always be brought back (spec goal 3).
 ///
@@ -90,10 +124,19 @@ public struct FeedbaxScenes: Scene {
       OutputWindowContent(host: bootstrap.host)
     }
     .defaultSize(width: 1280, height: 720)
+    .commands { ControlsReferenceCommands() }
 
     Window("Controls", id: FeedbaxWindow.controlsID) {
       ControlsWindowContent(viewModel: bootstrap.viewModel)
     }
     .defaultSize(width: 760, height: 900)
+
+    // The reference gets a Window-menu entry and frame restoration for free, like the other
+    // two (design §8.2).
+    Window("Controls Reference", id: FeedbaxWindow.referenceID) {
+      ControlsReferenceView(vm: bootstrap.viewModel)
+        .frame(minWidth: 420, minHeight: 360)
+    }
+    .defaultSize(width: 560, height: 640)
   }
 }

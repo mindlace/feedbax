@@ -37,5 +37,7 @@ final class AppBootstrapTests: XCTestCase {
     XCTAssertEqual(FeedbaxWindow.outputID, "output")
     XCTAssertEqual(FeedbaxWindow.controlsID, "controls")
     XCTAssertNotEqual(FeedbaxWindow.outputID, FeedbaxWindow.controlsID)
+    XCTAssertEqual(FeedbaxWindow.referenceID, "reference")
+    XCTAssertEqual(Set([FeedbaxWindow.outputID, FeedbaxWindow.controlsID, FeedbaxWindow.referenceID]).count, 3)
   }
 }
