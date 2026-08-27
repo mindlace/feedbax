@@ -34,7 +34,7 @@ The two "paired surfaces" in `feedbax.webui.maxpat` are two `mira.multitouch` pa
 position tracking worked out of the box — spec §04 §1.3. This design enables both.)
 
 In the port today: `KeyboardTrackpadSurface` handles two-finger scroll → pan, pinch → zoom,
-Option-drag → hue (x) / theta (y). There is no `rotate` handling, no plain-drag role, no
+Option-drag → hue (x) / rotate (y). There is no `rotate` handling, no plain-drag role, no
 menus, no help key, and `LayerTransform` is written only by `PresetStore.apply`.
 
 Two findings that shape the design:
@@ -76,7 +76,7 @@ duplicates or lacks:
 - `marker: String` / `fromMarker` — the JSON spelling: the existing slot markers plus
   `layerX`, `layerY`, `layerScale`, `layerRotate`.
 - `displayName: String` — what the panel, pickers, and reference window show: `Hue shift`,
-  `Brightness`, `Pan X`, `Pan Y`, `Zoom`, `Rotate`, `Saturation`, `Image X`, `Image Y`,
+  `Brightness`, `Pan X`, `Pan Y`, `Zoom`, `Rotate` (the `.theta` slot — the original's name for the field's rotation angle), `Saturation`, `Image X`, `Image Y`,
   `Image scale`, `Image rotate`.
 - `static let live: [ControlAxis]` — the 11 assignable axes (the 7 live slots — never
   `.scalebright`/`.nc` — plus the 4 layer axes), in display order.
@@ -113,7 +113,7 @@ at the write boundary so the router's existing slot code doesn't change shape.
   | `x` | −1.7 ... 1.7 | the webUI centroid scale `scale 0.1 0.9 -1.7 1.7` (spec §02 §4) |
   | `y` | −1 ... 1, +raw = up | the original's `1 -1` inversion was the pad's top-left origin, not a world-space fact |
   | `scale` | 0.01 ... 2.0 linear, uniform (x = y) | linear so pinch feels linear; floor keeps the quad non-degenerate. **Flagged for parity review** — the original's accumulator was exponential (spec §04 §1.3), and its exact curve isn't recoverable from the static listing |
-  | `rotate` | −180° ... 180°, clamped | the same contract `theta` has (raw ±1 → ∓π). **Flagged** — the original's `accum` was unbounded; a wrapping raw domain would fight the ramp at the seam |
+  | `rotate` | −180° ... 180°, clamped | the same contract the field's own rotate slot (`.theta`) has (raw ±1 → ∓π). **Flagged** — the original's `accum` was unbounded; a wrapping raw domain would fight the ramp at the seam |
 
 - `layerTransform: LayerTransform` — the ramped, mapped output, refreshed by `tick` alongside
   `RenderParams`. Not a `RenderParams` field: `RenderParams` is `FeedbackCore`'s input; the
@@ -166,12 +166,12 @@ this design's scope; the mechanism above is the fix when it's wanted.)
 | pinch | 2 | — | Zoom | |
 | pinch | 2 | Option | Image scale | |
 | pinch | 2 | Shift | Saturation | |
-| rotate (twist) | 2 | — | Rotate (theta) | |
+| rotate (twist) | 2 | — | Rotate | |
 | rotate | 2 | Option | Image rotate | |
 
 The mental model: *unmodified = the feedback field; Option = the image layer; Shift = colour.*
 Drag and scroll deliberately share targets — they are the one- and two-finger versions of
-"move". This replaces today's Option-drag → hue/theta (theta moves to twist; hue moves to
+"move". This replaces today's Option-drag → hue/rotate (rotate moves to twist; hue moves to
 Shift-drag).
 
 Rules that don't live in the table:
@@ -422,7 +422,7 @@ Changed:
 
 - Image scale mapping is linear 0.01–2.0; the original's was an exponential accumulator whose
   curve isn't recoverable statically.
-- Image rotate is clamped ±180° like `theta`; the original's accumulator was unbounded.
+- Image rotate is clamped ±180° like the field's rotate; the original's accumulator was unbounded.
 - Gesture directions (sign of each default `sensitivity`) are set by hand in the run pass.
 - Gesture-lock thresholds are first guesses.
 
