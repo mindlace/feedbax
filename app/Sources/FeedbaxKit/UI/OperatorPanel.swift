@@ -172,12 +172,12 @@ public struct OperatorPanel: View {
   }
 
   private func slider(_ label: String, slot: ControlSlot) -> some View {
-    let raw = vm.sliderValues[slot] ?? 0
+    let raw = vm.axisValues[.slot(slot)] ?? 0
     return LabeledContent(label) {
       HStack(spacing: 8) {
         Slider(
-          value: Binding(get: { vm.sliderValues[slot] ?? 0 }, set: { vm.slider(slot, changedTo: $0) }),
-          in: EngineViewModel.range(for: slot)
+          value: Binding(get: { vm.axisValues[.slot(slot)] ?? 0 }, set: { vm.axis(.slot(slot), changedTo: $0) }),
+          in: EngineViewModel.range(for: .slot(slot))
         )
         // The original panel's reading for this fader (its number boxes show the slider's
         // internal value, not the sent one) — see EngineViewModel.maxPanelValue.

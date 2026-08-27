@@ -87,7 +87,7 @@ public final class AppBootstrap {
     // same truth every poll (`EngineViewModel.refreshMirrorsFromTruth`) rather than through this
     // `ControlStateSnapshot` — it already holds `engine` directly, so a second indirection would
     // buy nothing.
-    let viewModel = EngineViewModel(engine: engine, presetStore: PresetStore())
+    let viewModel = EngineViewModel(engine: engine, presetStore: PresetStore(), bindingsStore: bindingsStore)
     // Order matters: later surfaces win ties (`ControlRouter`'s last-writer-wins arbitration,
     // spec §04 §1.2) — keyboard first, gamepad second, operator panel last, so an explicit
     // slider move by the person actually running the show always overrides a merely-held key or
