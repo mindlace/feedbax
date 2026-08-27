@@ -21,6 +21,7 @@ public final class AppBootstrap {
   public let viewModel: EngineViewModel
   public let host: EngineHost
   public let inputMonitor: PerformerInputMonitor
+  public let bindingsStore: BindingsStore
 
   /// Kept alive purely so ARC doesn't tear down the mic tap the instant `start()` returns —
   /// nothing reads this property directly; `AudioBands` (owned by `engine`) is the interface
@@ -31,7 +32,8 @@ public final class AppBootstrap {
 
   private init(
     engine: Engine, keyboardSurface: KeyboardTrackpadSurface, viewModel: EngineViewModel,
-    host: EngineHost, inputMonitor: PerformerInputMonitor, audioAnalysis: AudioAnalysis
+    host: EngineHost, inputMonitor: PerformerInputMonitor, audioAnalysis: AudioAnalysis,
+    bindingsStore: BindingsStore
   ) {
     self.engine = engine
     self.keyboardSurface = keyboardSurface
@@ -39,6 +41,7 @@ public final class AppBootstrap {
     self.host = host
     self.inputMonitor = inputMonitor
     self.audioAnalysis = audioAnalysis
+    self.bindingsStore = bindingsStore
   }
 
   /// Throws whatever `MetalContext`/`Engine`/`BindingsLoader` throw. There's no windowed way to
@@ -54,7 +57,10 @@ public final class AppBootstrap {
     // session actually starts from.
     engine.router.applyStartupDefaults(at: 0)
 
-    let bindings = try BindingsLoader.load(from: nil)
+    // The performer's own table wins over the bundled default (design §6.6); the same store
+    // is what the operator panel writes pad reassignments through.
+    let bindingsStore = try BindingsStore(userFileURL: BindingsStore.defaultUserFileURL)
+    let bindings = bindingsStore.bindings
     // Single source of truth for every flip-carrying toggle (final review, finding 4) — both
     // flip-memory surfaces below query this instead of keeping their own independent on/off
     // memory, which is what let keyboard/gamepad/operator-panel drift out of sync with each
@@ -69,7 +75,9 @@ public final class AppBootstrap {
       kittyBumpEnabled: { engine.bumpsEnabled.kitty },
       wave1Enabled: { engine.waveforms.wave1Enabled },
       wave2Enabled: { engine.waveforms.wave2Enabled },
-      layerEnabled: { engine.sticker.layer.enabled })
+      layerEnabled: { engine.sticker.layer.enabled },
+      // Relative trackpad gestures nudge from HERE (design §5), not from a private accumulator.
+      rawValue: { engine.router.rawValue(for: $0) })
     let keyboard = KeyboardTrackpadSurface(bindings: bindings, stateSnapshot: stateSnapshot)
     let gamepad = GamepadSurface(stateSnapshot: stateSnapshot)
     // `EngineViewModel` (Task 20) is registered exactly like keyboard/gamepad — design §5's
@@ -114,7 +122,7 @@ public final class AppBootstrap {
 
     return AppBootstrap(
       engine: engine, keyboardSurface: keyboard, viewModel: viewModel, host: host,
-      inputMonitor: inputMonitor, audioAnalysis: audioAnalysis
+      inputMonitor: inputMonitor, audioAnalysis: audioAnalysis, bindingsStore: bindingsStore
     )
   }
 
