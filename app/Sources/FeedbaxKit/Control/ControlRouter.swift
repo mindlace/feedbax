@@ -4,8 +4,8 @@ import simd
 /// Routes performer control input into per-frame `RenderParams` — the entire "control path"
 /// of the original patch (spec §01 §4's shaderfx maps, spec §04 §1.2's shadeCtl arbitration),
 /// minus the input devices themselves (Task 13/14 supply those as `ControlSurface`s). Owns
-/// the 9-slot raw control vector, SInvert, the erase channel, and one `LinearRamp` per
-/// smoothed slot.
+/// the 9-slot raw control vector, the 4-axis image-layer vector (design §4), SInvert, the
+/// erase channel, and one `LinearRamp` per smoothed slot.
 public final class ControlRouter {
   /// Slots that pass through a `LinearRamp` on their way to `RenderParams`. `.scalebright`
   /// and `.nc` are excluded — dead in the original (spec §01 §4) — they're still stored in
@@ -49,6 +49,25 @@ public final class ControlRouter {
   /// actually feeding the ramp changed," not just "when the raw input changed."
   private var lastRampTarget: [ControlSlot: Float]
 
+  /// Raw, unmapped image-layer axes, `LayerAxis.rawValue`-indexed — the original's `imageMove`
+  /// x/y/zoom/rotate (spec §02 §4). Starts at `startupLayerVector`, NOT zeros: unlike the 9
+  /// slots (whose raw-0 rest is "no control message has arrived yet"), the layer has a real
+  /// cold-start placement — `StickerSource`'s default 0.747 scale — and a bare `ControlRouter`
+  /// should already report it.
+  public private(set) var rawLayer: [Float]
+  private var layerRamps: [LayerAxis: LinearRamp]
+  private var lastLayerTarget: [LayerAxis: Float]
+
+  /// The ramped, mapped placement `Engine.step` hands both seed sources every frame (design
+  /// §4). Not a `RenderParams` field: `RenderParams` is `FeedbackCore`'s input, and the layer
+  /// transform belongs to the compositor.
+  public private(set) var layerTransform: LayerTransform
+
+  /// Raw layer vector a fresh session starts on: centred, unrotated, scale raw −0.253 — which
+  /// `mappedLayerTarget` turns into 0.747, `StickerSource`'s default (spec §02 §4). `x y scale
+  /// rotate`, `LayerAxis` order.
+  public static let startupLayerVector: [Float] = [0, 0, -0.253, 0]
+
   public init(smoothMs: Double = 100, grainMs: Double = 4) {
     self.smoothMs = smoothMs
     self.grainMs = grainMs
@@ -67,6 +86,19 @@ public final class ControlRouter {
       ramps[slot] = LinearRamp(initial: target, smoothMs: smoothMs, grainMs: grainMs)
       targets[slot] = target
     }
+    self.rawLayer = ControlRouter.startupLayerVector
+    var layerRamps: [LayerAxis: LinearRamp] = [:]
+    var layerTargets: [LayerAxis: Float] = [:]
+    for axis in LayerAxis.allCases {
+      // Seeded AT the mapped startup value (like the HSL slots' `coldStartSeed`), so cold start
+      // lands on the sticker's real default with no glide.
+      let target = ControlRouter.mappedLayerTarget(for: axis, raw: ControlRouter.startupLayerVector[axis.rawValue])
+      layerRamps[axis] = LinearRamp(initial: target, smoothMs: smoothMs, grainMs: grainMs)
+      layerTargets[axis] = target
+    }
+    self.layerRamps = layerRamps
+    self.lastLayerTarget = layerTargets
+    self.layerTransform = ControlRouter.layerTransform(from: layerTargets)
     self.ramps = ramps
     self.lastRampTarget = targets
   }
@@ -127,7 +159,11 @@ public final class ControlRouter {
     for slot in ControlSlot.allCases {
       slots[slot] = ControlRouter.startupVector[slot.rawValue]
     }
-    apply(ControlWrite(slots: slots), at: time)
+    var layer: [LayerAxis: Float] = [:]
+    for axis in LayerAxis.allCases {
+      layer[axis] = ControlRouter.startupLayerVector[axis.rawValue]
+    }
+    apply(ControlWrite(slots: slots, layer: layer), at: time)
     eraseControl = 1.0
   }
 
@@ -140,6 +176,11 @@ public final class ControlRouter {
         mergeAndProcess(write, at: time)
       }
     }
+    var mappedLayer: [LayerAxis: Float] = [:]
+    for axis in LayerAxis.allCases {
+      mappedLayer[axis] = layerRamps[axis]!.value(at: time)
+    }
+    layerTransform = ControlRouter.layerTransform(from: mappedLayer)
     // Never ramped (spec §01 §2). `scale 0 1 0.8 1 3` in Max's default classic mode is
     // `0.8 + 0.2·pow(3, x-1)`, and it is discontinuous at 0: exactly 0 gives 0.8, but 1e-6
     // gives 0.8667. So the knob's floor is 0.8 only at a hard zero — the useful range runs
@@ -158,6 +199,9 @@ public final class ControlRouter {
   private func mergeAndProcess(_ write: ControlWrite, at time: TimeInterval) {
     for (slot, value) in write.slots {
       rawSlots[slot.rawValue] = value
+    }
+    for (axis, value) in write.layer {
+      rawLayer[axis.rawValue] = value
     }
     for toggle in write.toggles {
       if case .sInvert(let on) = toggle {
@@ -182,6 +226,13 @@ public final class ControlRouter {
       if lastRampTarget[slot] != target {
         ramps[slot]?.setTarget(target, at: time)
         lastRampTarget[slot] = target
+      }
+    }
+    for axis in LayerAxis.allCases {
+      let target = ControlRouter.mappedLayerTarget(for: axis, raw: rawLayer[axis.rawValue])
+      if lastLayerTarget[axis] != target {
+        layerRamps[axis]?.setTarget(target, at: time)
+        lastLayerTarget[axis] = target
       }
     }
   }
@@ -255,6 +306,48 @@ public final class ControlRouter {
     case .theta: return maxScale(raw, -1, 1, .pi, -.pi)          // reversed hi/lo, spec §01 §4
     case .saturation: return maxScale(raw, 0, 1, -0.05, 0.05, exp: 0.1)
     case .scalebright, .nc: return 0   // dead slots — unreachable: not in `rampedSlots`
+    }
+  }
+
+  /// Raw −1...1 → `LayerTransform`'s world units (design §4's table). `x` is the webUI
+  /// centroid scale `scale 0.1 0.9 -1.7 1.7` (spec §02 §4); `y` keeps +raw = up (the
+  /// original's `1 -1` inversion was the iPad pad's top-left origin, not a world-space fact);
+  /// `scale` is linear 0...2 with a 0.01 floor — flagged for parity review, the original's
+  /// exponential accumulator isn't recoverable from the listing (spec §04 §1.3); `rotate` is
+  /// ±180°, the same clamped contract the field's own `.theta` slot has.
+  static func mappedLayerTarget(for axis: LayerAxis, raw: Float) -> Float {
+    switch axis {
+    case .x: return maxScale(raw, -1, 1, -1.7, 1.7)
+    case .y: return raw
+    case .scale: return max(0.01, maxScale(raw, -1, 1, 0, 2))
+    case .rotate: return maxScale(raw, -1, 1, -180, 180)
+    }
+  }
+
+  static func layerTransform(from mapped: [LayerAxis: Float]) -> LayerTransform {
+    let scale = mapped[.scale] ?? 1
+    return LayerTransform(position: SIMD2(mapped[.x] ?? 0, mapped[.y] ?? 0),
+                          scale: SIMD2(scale, scale),
+                          rotationZDegrees: mapped[.rotate] ?? 0)
+  }
+
+  /// The inverse of `mappedLayerTarget`, for preset recall (`PresetStore.apply` seeds this
+  /// channel from a saved `LayerTransform`). Uniform scale is assumed — `scale.x` is read.
+  public static func rawLayer(from transform: LayerTransform) -> [LayerAxis: Float] {
+    [
+      .x: ControlAxis.layer(.x).clamped(transform.position.x / 1.7),
+      .y: ControlAxis.layer(.y).clamped(transform.position.y),
+      .scale: ControlAxis.layer(.scale).clamped(transform.scale.x - 1),
+      .rotate: ControlAxis.layer(.rotate).clamped(transform.rotationZDegrees / 180),
+    ]
+  }
+
+  /// Truth for `ControlStateSnapshot.rawValue` (design §5): whatever was last written to the
+  /// axis, unramped and unmapped.
+  public func rawValue(for axis: ControlAxis) -> Float {
+    switch axis {
+    case .slot(let slot): return rawSlots[slot.rawValue]
+    case .layer(let layerAxis): return rawLayer[layerAxis.rawValue]
     }
   }
 }
