@@ -94,6 +94,6 @@ public struct FeedbaxScenes: Scene {
     Window("Controls", id: FeedbaxWindow.controlsID) {
       ControlsWindowContent(viewModel: bootstrap.viewModel)
     }
-    .defaultSize(width: 720, height: 800)
+    .defaultSize(width: 760, height: 900)
   }
 }
