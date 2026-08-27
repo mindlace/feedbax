@@ -48,6 +48,8 @@ The audio section (`p sound2`) draws waveform graphs into the GL context and gen
 
 ### Controls (Swift port)
 
+The native macOS port lives in [`app/`](app/README.md) — that README covers building, running (`swift run --package-path app feedbax-dev`), and testing it.
+
 Press `?` (or Help › Feedbax Controls, ⌘/) inside the app for the live reference — it is generated from the bindings table, so it is always current. Summary:
 
 **Keys:** `i` SInvert · `w` world bump · `a` wave bump · `k` kitty bump · `p` layer enable · `1`/`2` wave 1/2 · `f`/Esc fullscreen · `s` still capture · `[`/`]` erase −/+.
