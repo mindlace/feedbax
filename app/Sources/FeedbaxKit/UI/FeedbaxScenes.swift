@@ -83,26 +83,38 @@ private struct ControlsWindowContent: View {
   }
 }
 
-/// The app's first custom menu item (design §8.3): Help › Feedbax Controls, ⌘? — the
-/// platform's standard Help shortcut. `CommandGroup(replacing: .help)` swaps out SwiftUI's
-/// default (and inert) "<App> Help" entry. A bare `?` key equivalent would beat text fields
-/// to the keystroke, so the unmodified `?` goes through `PerformerInputMonitor` instead.
+/// The app's first custom menu item (design §8.3): Help › Feedbax Controls. The spec's intent
+/// is the platform's standard Help shortcut, ⌘?, but SwiftUI's `.keyboardShortcut` never actually
+/// registers a key equivalent on the underlying `NSMenuItem` for this item — verified by AX
+/// inspection (`AXMenuItemCmdChar`/`AXMenuItemCmdVirtualKey` come back empty, unlike a real
+/// working shortcut on the same running app) and by sending the actual keystroke while the app is
+/// frontmost, across every variant tried:
+///   - `.keyboardShortcut("?", modifiers: .command)` on a `Button` split into its own `View`
+///     (the original `ShowControlsReferenceButton`, since removed) — `?` is `Shift+/` on a US
+///     keyboard, and SwiftUI's `KeyEquivalent` apparently can't carry that implied Shift
+///     alongside an explicit `.command` modifier set.
+///   - `.keyboardShortcut("/", modifiers: [.command, .shift])`, same split-out `View` — the
+///     physical chord a performer would actually press for ⌘?. Also silently dropped.
+///   - The same `[.command, .shift]` shortcut on the `Button` declared inline here instead,
+///     reading `openWindow` via `@Environment` directly on this `Commands` conformer (`Commands`
+///     bodies can read environment values fine — the original split existed on a mistaken
+///     assumption otherwise). Still dropped.
+/// Three different shapes, same silent failure: the suspect is the Help menu itself. AppKit
+/// auto-manages `NSApplication.helpMenu` (it owns the Help-search field and macOS's own ⌘?
+/// reserved binding to it) and appears to strip any `keyboardShortcut` off a `Button` placed
+/// inside `CommandGroup(replacing: .help)`, independent of which chord is requested or how the
+/// view reads its environment. The shortcut is left attached (harmless, matches spec intent, and
+/// is that ⌘? chord verbatim) in case a future SwiftUI/AppKit revision honours it, but a performer
+/// cannot currently rely on it — click-through is the only path from the Help menu, and the bare
+/// `?` key (below, via `PerformerInputMonitor`) remains the fast path and is unaffected.
 private struct ControlsReferenceCommands: Commands {
-  var body: some Commands {
-    CommandGroup(replacing: .help) {
-      ShowControlsReferenceButton()
-    }
-  }
-}
-
-/// Split out because `openWindow` is an environment value, and environment values are only
-/// readable from a `View` — `Commands` bodies can't read them directly.
-private struct ShowControlsReferenceButton: View {
   @Environment(\.openWindow) private var openWindow
 
-  var body: some View {
-    Button("Feedbax Controls") { openWindow(id: FeedbaxWindow.referenceID) }
-      .keyboardShortcut("?", modifiers: .command)
+  var body: some Commands {
+    CommandGroup(replacing: .help) {
+      Button("Feedbax Controls") { openWindow(id: FeedbaxWindow.referenceID) }
+        .keyboardShortcut("/", modifiers: [.command, .shift])
+    }
   }
 }
 
