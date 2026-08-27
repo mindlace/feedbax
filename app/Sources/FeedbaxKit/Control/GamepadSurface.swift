@@ -87,9 +87,10 @@ public final class GamepadSurface: ControlSurface {
           action: "\(ControlAxis.slot(.hue).displayName) / \(ControlAxis.slot(.bias).displayName)", kind: "axes"),
     .init(input: "Right trigger", modifiers: "", action: ControlAxis.slot(.zoom).displayName, kind: "axis"),
     .init(input: "Left trigger", modifiers: "", action: ControlAxis.slot(.theta).displayName, kind: "axis"),
-    .init(input: "D-pad up / down", modifiers: "", action: "Erase +0.05 / −0.05", kind: "step"),
+    .init(input: "D-pad up / down", modifiers: "",
+          action: "Erase +\(GamepadSurface.stepText(GamepadSurface.eraseStepMagnitude)) / −\(GamepadSurface.stepText(GamepadSurface.eraseStepMagnitude))", kind: "step"),
     .init(input: "D-pad right / left", modifiers: "",
-          action: "\(ControlAxis.slot(.saturation).displayName) +0.1 / −0.1", kind: "step"),
+          action: "\(ControlAxis.slot(.saturation).displayName) +\(GamepadSurface.stepText(GamepadSurface.saturationStepMagnitude)) / −\(GamepadSurface.stepText(GamepadSurface.saturationStepMagnitude))", kind: "step"),
     .init(input: "A", modifiers: "", action: ToggleEvent.sInvert(true).displayName, kind: "toggle"),
     .init(input: "B", modifiers: "", action: ToggleEvent.layerEnabled(true).displayName, kind: "toggle"),
     .init(input: "X", modifiers: "", action: ToggleEvent.wave1Enabled(true).displayName, kind: "toggle"),
@@ -107,6 +108,9 @@ public final class GamepadSurface: ControlSurface {
   private static let triggerDeadzone: Float = stickDeadzone
   private static let eraseStepMagnitude: Float = 0.05
   private static let saturationStepMagnitude: Float = 0.1
+  /// `0.05` → "0.05", `0.1` → "0.1": the reference window shows the step the d-pad actually
+  /// applies, read from the same constant `poll` uses, so the two cannot drift (design §8.1).
+  private static func stepText(_ magnitude: Float) -> String { String(format: "%g", magnitude) }
   /// GC d-pad axes report as effectively digital (−1/0/1 floats); this just needs to sit
   /// strictly between "released" (0) and "pressed" (±1).
   private static let dpadPressThreshold: Float = 0.5

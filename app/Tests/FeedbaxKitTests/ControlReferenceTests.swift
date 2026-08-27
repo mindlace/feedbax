@@ -55,5 +55,7 @@ final class ControlReferenceTests: XCTestCase {
       XCTAssertTrue(inputs.contains(name), "\(name) is read by GamepadSurface.poll but has no reference row")
     }
     XCTAssertEqual(rows.first { $0.input == "Left trigger" }?.action, "Rotate", "uses ControlAxis.displayName")
+    XCTAssertEqual(rows.first { $0.input == "D-pad up / down" }?.action, "Erase +0.05 / −0.05",
+                   "derived from GamepadSurface's own eraseStepMagnitude, not a separate literal")
   }
 }
