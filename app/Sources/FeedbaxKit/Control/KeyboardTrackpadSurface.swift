@@ -85,6 +85,13 @@ public final class KeyboardTrackpadSurface: ControlSurface {
 
   /// One normalised gesture event (design §6.4). Unbound → no-op, same as an unbound key.
   public func gesture(_ event: GestureEvent) {
+    // A lift-off must reach the lock even when this event's modifiers are unbound (design
+    // §6.3) — otherwise a modifier change at the end of a claimed gesture leaves the lock
+    // claimed forever.
+    if event.phase.isTerminal {
+      _ = lock.admit(event)
+      return   // nothing to apply: terminal events carry no delta
+    }
     guard let binding = bindings.trackpadBinding(for: event.gesture, modifiers: event.modifiers) else { return }
     // Bound gestures only reach the lock — an unbound combination the monitor let through
     // (or a test fed directly) must not claim a sequence nothing will ever end.

@@ -55,6 +55,20 @@ public final class PerformerInputMonitor {
     eventIsInOutputWindow ? .forward : .passThrough
   }
 
+  /// `forward(...)`'s consume/pass-through decision, pulled out pure: scroll/rotate `NSEvent`s
+  /// cannot be synthesized in a headless test process, so this is what gets exercised directly.
+  /// Forwards when the event is in the output window, carries a performer modifier set (not a
+  /// Command/Control chord, which is `nil`), and EITHER the gesture+modifiers combination is
+  /// bound OR the phase is terminal (`.ended`/`.cancelled`) — a lift-off must always reach
+  /// `GestureLock` even when the performer changed the held modifier since the gesture began
+  /// (design §6.3, review finding): otherwise the lock stays claimed forever and silently
+  /// discards every later gesture of a different kind.
+  public static func decideGesture(eventIsInOutputWindow: Bool, modifiers: Set<GestureModifier>?,
+                                   phase: GesturePhase, isBound: Bool) -> Decision {
+    guard eventIsInOutputWindow, modifiers != nil else { return .passThrough }
+    return (phase.isTerminal || isBound) ? .forward : .passThrough
+  }
+
   /// Which performer modifiers a pointer event carries, or nil when Command/Control make it an
   /// app/window chord that must pass through — the same rule `decideKey` applies to keys.
   /// Only Option and Shift are performer modifiers (`GestureModifier`); Caps Lock, Fn and the
@@ -206,12 +220,17 @@ public final class PerformerInputMonitor {
   /// Command/Control chord, and a bindings row for this gesture + modifiers — otherwise the
   /// event passes through untouched (a two-finger scroll over the Controls form keeps
   /// scrolling the form; an Option+Shift pinch nobody bound reaches whatever wanted it).
+  /// Terminal phases (`.ended`/`.cancelled`) bypass the bindings-row check via `decideGesture`
+  /// and are forwarded regardless — the surface's `gesture(_:)` routes them straight to
+  /// `GestureLock` without touching the bindings table, so a lift-off always releases whatever
+  /// it claimed even if the performer changed the held modifier before lifting (design §6.3).
   private func forward(_ gesture: TrackpadGesture, event: NSEvent, phase: GesturePhase,
                        delta: SIMD2<Float>) -> Decision {
-    guard isOutputWindowEvent(event),
-          let modifiers = Self.gestureModifiers(event.modifierFlags),
-          surface.handles(gesture, modifiers: modifiers) else { return .passThrough }
-    surface.gesture(GestureEvent(gesture: gesture, modifiers: modifiers, phase: phase, delta: delta))
+    let modifiers = Self.gestureModifiers(event.modifierFlags)
+    let isBound = modifiers.map { surface.handles(gesture, modifiers: $0) } ?? false
+    guard Self.decideGesture(eventIsInOutputWindow: isOutputWindowEvent(event), modifiers: modifiers,
+                             phase: phase, isBound: isBound) == .forward else { return .passThrough }
+    surface.gesture(GestureEvent(gesture: gesture, modifiers: modifiers!, phase: phase, delta: delta))
     return .forward
   }
 

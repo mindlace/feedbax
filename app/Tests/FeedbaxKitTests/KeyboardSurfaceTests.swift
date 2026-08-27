@@ -115,6 +115,24 @@ final class KeyboardSurfaceTests: XCTestCase {
     XCTAssertNil(s.poll(0))
   }
 
+  /// Review finding: a performer can change the held modifier between claiming a two-finger
+  /// gesture and lifting off. If the terminal event's now-unbound modifier combination never
+  /// reached `GestureLock`, the lock would stay `.claimed(.rotate)` forever and silently
+  /// discard every later pinch/scroll of a different kind (design §6.3 requires the winner's
+  /// `.ended`/`.cancelled` to release the lock, unconditionally).
+  func testALiftOffWithAnUnboundModifierStillReleasesTheLock() throws {
+    let s = try surface()
+    s.gesture(GestureEvent(gesture: .rotate, modifiers: [.option], dx: 0.1))   // claims (> 5/180 threshold)
+    XCTAssertNotNil(s.poll(0), "the claiming event itself nudges layerRotate")
+    // The performer swaps to Shift before lifting off — rotate+shift has no bindings row.
+    s.gesture(GestureEvent(gesture: .rotate, modifiers: [.shift], phase: .ended, dx: 0))
+    XCTAssertNil(s.poll(0.016), "the unbound terminal event itself applies nothing")
+    s.gesture(GestureEvent(gesture: .pinch, dx: 0.2))
+    let w = s.poll(0.032)!
+    XCTAssertEqual(w.slots[.zoom]!, 0.2, accuracy: 1e-6,
+                   "the lock must have released — otherwise this pinch is discarded as a non-winner")
+  }
+
   /// Spec §6.3 end to end: a twist that leaks pinch deltas moves rotate only.
   func testATwistThatLeaksPinchDeltasMovesRotateOnly() throws {
     let s = try surface()

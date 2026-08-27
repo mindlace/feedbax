@@ -271,4 +271,36 @@ final class PerformerInputMonitorTests: XCTestCase {
     XCTAssertEqual(monitor.handle(dragEvent(window: other)), .passThrough)
   }
 
+  /// Review finding: `forward` used to gate every pointer event, including `.ended`/`.cancelled`,
+  /// on `surface.handles(gesture, modifiers:)`. A performer who changes the held modifier
+  /// between claiming a two-finger gesture and lifting off sends a terminal event whose CURRENT
+  /// modifier combo may be unbound — `rotate`+Shift has no row in `DefaultBindings.json`. If that
+  /// terminal event passed through instead of reaching the surface, `GestureLock` never saw the
+  /// `.ended` and stayed `.claimed(.rotate)` forever, silently discarding every later gesture of
+  /// a different kind. `decideGesture` is `forward(...)`'s consume/pass-through decision pulled
+  /// out pure, since scroll/rotate `NSEvent`s cannot be synthesized in this headless test
+  /// process (design §6.3: the winner's `.ended`/`.cancelled` must always reach the lock).
+  func testDecideGestureLetsTerminalPhasesThroughEvenWhenUnbound() {
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: true, modifiers: [.option],
+                                          phase: .changed, isBound: true),
+      .forward, "bound + changed forwards normally")
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: true, modifiers: [.shift],
+                                          phase: .changed, isBound: false),
+      .passThrough, "unbound + changed is not this surface's business")
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: true, modifiers: [.shift],
+                                          phase: .ended, isBound: false),
+      .forward, "a lift-off must reach the lock even on an unbound modifier combo")
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: true, modifiers: nil,
+                                          phase: .ended, isBound: false),
+      .passThrough, "a Command/Control chord (nil modifiers) is never ours, terminal or not")
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: false, modifiers: [.shift],
+                                          phase: .ended, isBound: false),
+      .passThrough, "outside the output window, nothing is ours regardless of phase")
+  }
+
 }

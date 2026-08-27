@@ -37,6 +37,11 @@ public enum GestureModifier: String, Codable, CaseIterable {
 /// `GestureLock` (Task 5) needs to know.
 public enum GesturePhase: Equatable {
   case began, changed, ended, cancelled
+
+  /// `.ended`/`.cancelled` — the phases that release `GestureLock`. They must reach the surface
+  /// even when the event's current modifier set is unbound (design §6.3): a performer who
+  /// changes modifiers at lift-off still lifted.
+  public var isTerminal: Bool { self == .ended || self == .cancelled }
 }
 
 /// One gesture event as the surface sees it: AppKit-free, already normalised by
