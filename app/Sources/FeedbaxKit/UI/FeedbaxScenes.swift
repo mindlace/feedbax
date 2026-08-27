@@ -83,37 +83,25 @@ private struct ControlsWindowContent: View {
   }
 }
 
-/// The app's first custom menu item (design §8.3): Help › Feedbax Controls. The spec's intent
-/// is the platform's standard Help shortcut, ⌘?, but SwiftUI's `.keyboardShortcut` never actually
-/// registers a key equivalent on the underlying `NSMenuItem` for this item — verified by AX
-/// inspection (`AXMenuItemCmdChar`/`AXMenuItemCmdVirtualKey` come back empty, unlike a real
-/// working shortcut on the same running app) and by sending the actual keystroke while the app is
-/// frontmost, across every variant tried:
-///   - `.keyboardShortcut("?", modifiers: .command)` on a `Button` split into its own `View`
-///     (the original `ShowControlsReferenceButton`, since removed) — `?` is `Shift+/` on a US
-///     keyboard, and SwiftUI's `KeyEquivalent` apparently can't carry that implied Shift
-///     alongside an explicit `.command` modifier set.
-///   - `.keyboardShortcut("/", modifiers: [.command, .shift])`, same split-out `View` — the
-///     physical chord a performer would actually press for ⌘?. Also silently dropped.
-///   - The same `[.command, .shift]` shortcut on the `Button` declared inline here instead,
-///     reading `openWindow` via `@Environment` directly on this `Commands` conformer (`Commands`
-///     bodies can read environment values fine — the original split existed on a mistaken
-///     assumption otherwise). Still dropped.
-/// Three different shapes, same silent failure: the suspect is the Help menu itself. AppKit
-/// auto-manages `NSApplication.helpMenu` (it owns the Help-search field and macOS's own ⌘?
-/// reserved binding to it) and appears to strip any `keyboardShortcut` off a `Button` placed
-/// inside `CommandGroup(replacing: .help)`, independent of which chord is requested or how the
-/// view reads its environment. The shortcut is left attached (harmless, matches spec intent, and
-/// is that ⌘? chord verbatim) in case a future SwiftUI/AppKit revision honours it, but a performer
-/// cannot currently rely on it — click-through is the only path from the Help menu, and the bare
-/// `?` key (below, via `PerformerInputMonitor`) remains the fast path and is unaffected.
+/// The app's first custom menu item (design §8.3): Help › Feedbax Controls. The design asked for
+/// the platform's standard Help shortcut, ⌘? — but ⌘? IS ⌘⇧/, and macOS reserves that exact chord
+/// system-wide for the Help menu's own search field. Confirmed by trying `.keyboardShortcut("?",
+/// modifiers: .command)` and, equivalently, `.keyboardShortcut("/", modifiers: [.command, .shift])`
+/// (both on a split-out `View` and declared inline here): every shape was silently stripped from
+/// the underlying `NSMenuItem` — AX inspection showed no `AXMenuItemCmdChar`/`AXMenuItemCmdVirtualKey`
+/// ever landing, and the real keystroke never opened the window. AppKit auto-manages
+/// `NSApplication.helpMenu` and won't let an item's shortcut collide with the menu's own reserved
+/// binding, no matter how the shortcut is expressed. So this item uses ⌘/ instead — the same
+/// physical key, unshifted, with no system collision — which is the best available stand-in for
+/// the spec's ⌘? intent. The bare `?` key (below, via `PerformerInputMonitor`) still opens the same
+/// window and remains the fast path regardless of which chord the menu carries.
 private struct ControlsReferenceCommands: Commands {
   @Environment(\.openWindow) private var openWindow
 
   var body: some Commands {
     CommandGroup(replacing: .help) {
       Button("Feedbax Controls") { openWindow(id: FeedbaxWindow.referenceID) }
-        .keyboardShortcut("/", modifiers: [.command, .shift])
+        .keyboardShortcut("/", modifiers: .command)
     }
   }
 }
