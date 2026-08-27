@@ -1,10 +1,19 @@
 import AppKit
 import Foundation
+import simd
 
 /// One app-level `NSEvent` local monitor, installed once at bootstrap, replacing the
 /// per-view input overrides `MetalHostView` used to carry. That is spec goal 4: a performer
 /// tweaking a slider in the control window can still hit a key binding without clicking back
 /// into the output window first.
+///
+/// Five event types feed the switch in `handle(_:)`: `.keyDown` (bound keys, Escape/`f`
+/// fullscreen, and the `?` help key below) and four pointer gestures — `.scrollWheel`,
+/// `.magnify`, `.rotate`, `.leftMouseDragged` — all normalised and routed through the single
+/// `forward(_:event:phase:delta:)` helper onto `KeyboardTrackpadSurface.gesture(_:)` (design
+/// §6.2). `?` (Shift-/) is the odd one out: it never reaches the bindings table at all — it
+/// posts `.feedbaxShowControlsReference` and is consumed, the same "app action, not a control
+/// write" treatment Escape gets (design §8.3).
 public final class PerformerInputMonitor {
   private let surface: KeyboardTrackpadSurface
   private let outputWindow: () -> NSWindow?
@@ -46,6 +55,74 @@ public final class PerformerInputMonitor {
     eventIsInOutputWindow ? .forward : .passThrough
   }
 
+  /// `forward(...)`'s consume/pass-through decision, pulled out pure: scroll/rotate `NSEvent`s
+  /// cannot be synthesized in a headless test process, so this is what gets exercised directly.
+  /// Forwards when the event is in the output window, carries a performer modifier set (not a
+  /// Command/Control chord, which is `nil`), and EITHER the gesture+modifiers combination is
+  /// bound OR the phase is terminal (`.ended`/`.cancelled`) — a lift-off must always reach
+  /// `GestureLock` even when the performer changed the held modifier since the gesture began
+  /// (design §6.3, review finding): otherwise the lock stays claimed forever and silently
+  /// discards every later gesture of a different kind.
+  public static func decideGesture(eventIsInOutputWindow: Bool, modifiers: Set<GestureModifier>?,
+                                   phase: GesturePhase, isBound: Bool) -> Decision {
+    guard eventIsInOutputWindow, modifiers != nil else { return .passThrough }
+    return (phase.isTerminal || isBound) ? .forward : .passThrough
+  }
+
+  /// Which performer modifiers a pointer event carries, or nil when Command/Control make it an
+  /// app/window chord that must pass through — the same rule `decideKey` applies to keys.
+  /// Only Option and Shift are performer modifiers (`GestureModifier`); Caps Lock, Fn and the
+  /// numeric-pad bit are ignored rather than disqualifying.
+  public static func gestureModifiers(_ flags: NSEvent.ModifierFlags) -> Set<GestureModifier>? {
+    let chord = flags.intersection(.deviceIndependentFlagsMask)
+    if chord.contains(.command) || chord.contains(.control) { return nil }
+    var modifiers: Set<GestureModifier> = []
+    if chord.contains(.option) { modifiers.insert(.option) }
+    if chord.contains(.shift) { modifiers.insert(.shift) }
+    return modifiers
+  }
+
+  /// `NSEvent.Phase` → `GesturePhase`, reading BOTH of the phase fields a scroll carries.
+  ///
+  /// A flick on a trackpad produces two runs of events: the fingers-down scroll (lifecycle in
+  /// `event.phase`, `momentumPhase` empty) and then the coast that keeps arriving after
+  /// lift-off (`phase` EMPTY, lifecycle in `event.momentumPhase`). Reading `phase` alone made
+  /// every coasting event a `.changed`: each one accumulated travel and re-claimed
+  /// `GestureLock` for `.scroll`, and since no `.ended` ever came, the lock stayed claimed and
+  /// silently discarded every pinch and twist that followed — until the performer happened to
+  /// finish another real scroll (design §6.3, final-review finding 1).
+  ///
+  /// Priority: `.cancelled` over `.ended` over `.began`, and a terminal bit in EITHER field
+  /// wins — a release must never be lost, since it is what frees the lock. `NSEvent.Phase` is
+  /// an `OptionSet`, so several bits really can be set at once. Momentum `.began` is
+  /// deliberately mapped to `.changed`, not `.began`: the fingers are already up, the sequence
+  /// was claimed by the real scroll (or will be re-claimed by the coast's own travel), and
+  /// nothing downstream wants a second "began" mid-flick.
+  public static func gesturePhase(_ phase: NSEvent.Phase,
+                                  momentum: NSEvent.Phase = []) -> GesturePhase {
+    if phase.contains(.cancelled) || momentum.contains(.cancelled) { return .cancelled }
+    if phase.contains(.ended) || momentum.contains(.ended) { return .ended }
+    if phase.contains(.began) { return .began }
+    return .changed
+  }
+
+  /// `NSEvent.rotation` is degrees per event; ÷180 makes half a turn span the whole −1...1
+  /// raw range at sensitivity 1 (design §6.2).
+  public static let rotationNormalization: Float = 180
+
+  public static func normalizedRotation(_ degrees: Float) -> Float {
+    degrees / rotationNormalization
+  }
+
+  /// `?` opens the Controls Reference (design §8.3): no text editor focused, and no modifier
+  /// beyond Shift (Shift-/ is how a US keyboard types it). ⌘? is deliberately NOT ours — that
+  /// is the Help menu item's own key equivalent.
+  public static func decideHelpKey(firstResponderIsTextEditor: Bool, characters: String?,
+                                   chordFlags: NSEvent.ModifierFlags) -> Bool {
+    guard characters == "?", !firstResponderIsTextEditor else { return false }
+    return chordFlags.subtracting(.shift).isEmpty
+  }
+
   /// `NSTextView` covers SwiftUI's `TextField` too: AppKit hands an editing text field its
   /// window's shared *field editor*, which is an `NSTextView`, as first responder.
   public static func isTextEditor(_ responder: NSResponder?) -> Bool {
@@ -61,7 +138,7 @@ public final class PerformerInputMonitor {
   public func install() {
     guard monitor == nil else { return }
     monitor = NSEvent.addLocalMonitorForEvents(
-      matching: [.keyDown, .scrollWheel, .magnify, .leftMouseDragged]
+      matching: [.keyDown, .scrollWheel, .magnify, .rotate, .leftMouseDragged]
     ) { [weak self] event in
       guard let self else { return event }
       return self.handle(event) == .forward ? nil : event
@@ -102,6 +179,11 @@ public final class PerformerInputMonitor {
         outputWindow()?.toggleFullScreen(nil)
         if event.keyCode == 53 { return .forward }   // Escape: consumed, nothing to forward
       }
+      if Self.decideHelpKey(firstResponderIsTextEditor: isText, characters: characters,
+                            chordFlags: chordFlags) {
+        NotificationCenter.default.post(name: .feedbaxShowControlsReference, object: nil)
+        return .forward   // consumed: `?` is an app action, not a control write
+      }
       // A local monitor sees every keydown in the app, not just ones destined for this
       // surface — Cmd-Q, Tab, arrow keys, Space are none of `KeyboardTrackpadSurface`'s
       // business, and returning nil from the monitor CONSUMES the event, so an unbound key or
@@ -120,34 +202,54 @@ public final class PerformerInputMonitor {
       return .forward
 
     case .scrollWheel:
-      guard isOutputWindowEvent(event), let height = eventViewHeight(event) else { return .passThrough }
-      // `scrollingDeltaX/Y` are raw POINTS and one fast swipe can report 5–40 of them; fed
-      // straight into `accumulate`'s ±1 range that slams the pan accumulator to its clamp in a
-      // single event. Dividing by the output view's height turns "drag the full height of the
-      // output" into "drive the axis across its whole −1...1 range", and scales with the
-      // window automatically. `KeyboardTrackpadSurface` is deliberately AppKit-free and has no
-      // view geometry of its own, which is why this normalization lives here.
-      surface.scroll(dx: Float(event.scrollingDeltaX) / height,
-                     dy: Float(event.scrollingDeltaY) / height)
-      return .forward
+      // `scrollingDeltaX/Y` are raw POINTS and one fast swipe can report 5–40 of them; ÷ the
+      // output view's height turns "drag the full height of the output" into "drive the axis
+      // across its whole −1...1 range" and scales with the window. The surface is AppKit-free
+      // and has no geometry of its own, which is why the normalisation lives here.
+      guard let height = eventViewHeight(event) else { return .passThrough }
+      // `momentumPhase` as well as `phase`: scroll is the one gesture that keeps delivering
+      // events after the fingers lift, and only `momentumPhase` says when that coast ends.
+      return forward(.scroll, event: event,
+                     phase: Self.gesturePhase(event.phase, momentum: event.momentumPhase),
+                     delta: SIMD2(Float(event.scrollingDeltaX) / height, Float(event.scrollingDeltaY) / height))
 
     case .magnify:
-      guard isOutputWindowEvent(event) else { return .passThrough }
-      // `magnification` is already a small per-event ratio, not raw points — no normalization.
-      surface.magnify(Float(event.magnification))
-      return .forward
+      // `magnification` is already a small per-event ratio — no normalisation.
+      return forward(.pinch, event: event, phase: Self.gesturePhase(event.phase),
+                     delta: SIMD2(Float(event.magnification), 0))
+
+    case .rotate:
+      return forward(.rotate, event: event, phase: Self.gesturePhase(event.phase),
+                     delta: SIMD2(Self.normalizedRotation(Float(event.rotation)), 0))
 
     case .leftMouseDragged:
-      // Option-held drag: x → hue, y → theta (`KeyboardTrackpadSurface.modifiedDrag`). Plain
-      // drags are intentionally not forwarded — the output view has no click-drag role in P1.
-      guard event.modifierFlags.contains(.option), isOutputWindowEvent(event),
-            let height = eventViewHeight(event) else { return .passThrough }
-      surface.modifiedDrag(dx: Float(event.deltaX) / height, dy: Float(event.deltaY) / height)
-      return .forward
+      // Plain drag = pan, Option = image layer, Shift = colour (design §6.1) — which is which
+      // is the bindings table's business; this just normalises like scroll.
+      guard let height = eventViewHeight(event) else { return .passThrough }
+      return forward(.drag, event: event, phase: .changed,
+                     delta: SIMD2(Float(event.deltaX) / height, Float(event.deltaY) / height))
 
     default:
       return .passThrough
     }
+  }
+
+  /// One path for every pointer gesture: output window only (`decidePointer`), no
+  /// Command/Control chord, and a bindings row for this gesture + modifiers — otherwise the
+  /// event passes through untouched (a two-finger scroll over the Controls form keeps
+  /// scrolling the form; an Option+Shift pinch nobody bound reaches whatever wanted it).
+  /// Terminal phases (`.ended`/`.cancelled`) bypass the bindings-row check via `decideGesture`
+  /// and are forwarded regardless — the surface's `gesture(_:)` routes them straight to
+  /// `GestureLock` without touching the bindings table, so a lift-off always releases whatever
+  /// it claimed even if the performer changed the held modifier before lifting (design §6.3).
+  private func forward(_ gesture: TrackpadGesture, event: NSEvent, phase: GesturePhase,
+                       delta: SIMD2<Float>) -> Decision {
+    let modifiers = Self.gestureModifiers(event.modifierFlags)
+    let isBound = modifiers.map { surface.handles(gesture, modifiers: $0) } ?? false
+    guard Self.decideGesture(eventIsInOutputWindow: isOutputWindowEvent(event), modifiers: modifiers,
+                             phase: phase, isBound: isBound) == .forward else { return .passThrough }
+    surface.gesture(GestureEvent(gesture: gesture, modifiers: modifiers!, phase: phase, delta: delta))
+    return .forward
   }
 
   private func isOutputWindowEvent(_ event: NSEvent) -> Bool {
@@ -162,4 +264,12 @@ public final class PerformerInputMonitor {
     guard let height = event.window?.contentView?.bounds.height, height > 0 else { return nil }
     return Float(height)
   }
+}
+
+extension Notification.Name {
+  /// Posted by `PerformerInputMonitor` on the `?` key (design §8.3). `NotificationCenter` is the
+  /// conventional bridge from an AppKit object to SwiftUI views without either owning the
+  /// other — `FeedbaxScenes`' window content views `.onReceive` this and open the Controls
+  /// Reference window (design §13).
+  public static let feedbaxShowControlsReference = Notification.Name("FeedbaxShowControlsReference")
 }

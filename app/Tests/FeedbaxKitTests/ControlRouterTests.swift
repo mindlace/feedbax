@@ -72,4 +72,82 @@ final class ControlRouterTests: XCTestCase {
     lower.apply(ControlWrite(eraseStep: -0.5), at: 0)
     XCTAssertEqual(lower.eraseControl, 0.0, accuracy: 1e-5, "eraseStep clamps at the floor")
   }
+
+  // MARK: - Layer channel (design §4)
+
+  func testLayerChannelColdStartIsTheStickerDefault() {
+    let r = ControlRouter()
+    let t = r.layerTransform
+    XCTAssertEqual(t.scale.x, 0.747, accuracy: 1e-4, "StickerSource's default scale, spec §02 §4")
+    XCTAssertEqual(t.scale.y, 0.747, accuracy: 1e-4, "uniform")
+    XCTAssertEqual(t.position, .zero)
+    XCTAssertEqual(t.rotationZDegrees, 0)
+    XCTAssertEqual(r.rawLayer, ControlRouter.startupLayerVector)
+    r.applyStartupDefaults(at: 0)
+    XCTAssertEqual(r.rawLayer, ControlRouter.startupLayerVector, "startup defaults reassert the same vector")
+  }
+
+  func testLayerAxesMapToWorldUnits() {
+    let r = ControlRouter()
+    r.apply(ControlWrite(layer: [.x: 1, .y: -1, .scale: 1, .rotate: -1]), at: 0)
+    _ = r.tick(at: 1.0)   // 1 s ≫ 100 ms — settled
+    let t = r.layerTransform
+    XCTAssertEqual(t.position.x, 1.7, accuracy: 1e-4, "webUI centroid scale, spec §02 §4")
+    XCTAssertEqual(t.position.y, -1, accuracy: 1e-4)
+    XCTAssertEqual(t.scale.x, 2, accuracy: 1e-4)
+    XCTAssertEqual(t.rotationZDegrees, -180, accuracy: 1e-3)
+  }
+
+  func testLayerScaleIsFlooredAboveZero() {
+    let r = ControlRouter()
+    r.apply(ControlWrite(layer: [.scale: -1]), at: 0)
+    _ = r.tick(at: 1.0)
+    XCTAssertEqual(r.layerTransform.scale.x, 0.01, accuracy: 1e-5, "a zero-size quad is degenerate")
+  }
+
+  func testLayerAxesRampLikeSlots() {
+    let r = ControlRouter()
+    _ = r.tick(at: 0)
+    r.apply(ControlWrite(layer: [.x: 1]), at: 0)      // 0 → 1.7 over 100 ms
+    _ = r.tick(at: 0.05)
+    XCTAssertEqual(r.layerTransform.position.x, 0.85, accuracy: 0.05, "linear ramp: halfway at 50 ms")
+    _ = r.tick(at: 0.2)
+    XCTAssertEqual(r.layerTransform.position.x, 1.7, accuracy: 1e-3)
+  }
+
+  func testLastSurfaceWinsPerLayerAxis() {
+    final class FixedLayer: ControlSurface {
+      let id: String; let write: ControlWrite
+      init(_ id: String, _ w: ControlWrite) { self.id = id; write = w }
+      func poll(_ time: TimeInterval) -> ControlWrite? { write }
+    }
+    let r = ControlRouter()
+    r.surfaces = [FixedLayer("a", .init(layer: [.x: -1, .rotate: 0.5])),
+                  FixedLayer("b", .init(layer: [.x: 1]))]
+    _ = r.tick(at: 1)
+    XCTAssertEqual(r.rawLayer[LayerAxis.x.rawValue], 1, "later surface overwrites x")
+    XCTAssertEqual(r.rawLayer[LayerAxis.rotate.rawValue], 0.5, "unasserted axis keeps earlier write")
+  }
+
+  func testRawLayerInvertsTheLayerMap() {
+    // −1 is excluded for scale on purpose: the 0.01 floor makes the map non-invertible there.
+    for raw: Float in [-0.9, -0.253, 0, 0.6, 1] {
+      var mapped: [LayerAxis: Float] = [:]
+      for axis in LayerAxis.allCases {
+        mapped[axis] = ControlRouter.mappedLayerTarget(for: axis, raw: raw)
+      }
+      let back = ControlRouter.rawLayer(from: ControlRouter.layerTransform(from: mapped))
+      for axis in LayerAxis.allCases {
+        XCTAssertEqual(back[axis]!, raw, accuracy: 1e-5, "\(axis) at raw \(raw)")
+      }
+    }
+  }
+
+  func testRawValueReadsBothVectors() {
+    let r = ControlRouter()
+    r.apply(ControlWrite(slots: [.hue: 0.3], layer: [.y: -0.4]), at: 0)
+    XCTAssertEqual(r.rawValue(for: .slot(.hue)), 0.3)
+    XCTAssertEqual(r.rawValue(for: .layer(.y)), -0.4)
+    XCTAssertEqual(r.rawValue(for: .slot(.zoom)), 0, "untouched slot")
+  }
 }

@@ -7,6 +7,7 @@ import SwiftUI
 public enum FeedbaxWindow {
   public static let outputID = "output"
   public static let controlsID = "controls"
+  public static let referenceID = "reference"
 }
 
 /// The launch-time "make sure both windows are open" one-shot (Ruling 11), shared by both
@@ -47,6 +48,11 @@ private struct OutputWindowContent: View {
       .onAppear {
         LaunchWindowOpener.openCompanionOnce { openWindow(id: FeedbaxWindow.controlsID) }
       }
+      // `?` from `PerformerInputMonitor` (design §8.3). Both windows listen; `openWindow` on
+      // an already-open window just focuses it, so two receivers can't fight.
+      .onReceive(NotificationCenter.default.publisher(for: .feedbaxShowControlsReference)) { _ in
+        openWindow(id: FeedbaxWindow.referenceID)
+      }
   }
 }
 
@@ -69,11 +75,39 @@ private struct ControlsWindowContent: View {
       .onAppear {
         LaunchWindowOpener.openCompanionOnce { openWindow(id: FeedbaxWindow.outputID) }
       }
+      // `?` from `PerformerInputMonitor` (design §8.3). Both windows listen; `openWindow` on
+      // an already-open window just focuses it, so two receivers can't fight.
+      .onReceive(NotificationCenter.default.publisher(for: .feedbaxShowControlsReference)) { _ in
+        openWindow(id: FeedbaxWindow.referenceID)
+      }
+  }
+}
+
+/// The app's first custom menu item (design §8.3): Help › Feedbax Controls. The design asked for
+/// the platform's standard Help shortcut, ⌘? — but ⌘? IS ⌘⇧/, and macOS reserves that exact chord
+/// system-wide for the Help menu's own search field. Confirmed by trying `.keyboardShortcut("?",
+/// modifiers: .command)` and, equivalently, `.keyboardShortcut("/", modifiers: [.command, .shift])`
+/// (both on a split-out `View` and declared inline here): every shape was silently stripped from
+/// the underlying `NSMenuItem` — AX inspection showed no `AXMenuItemCmdChar`/`AXMenuItemCmdVirtualKey`
+/// ever landing, and the real keystroke never opened the window. AppKit auto-manages
+/// `NSApplication.helpMenu` and won't let an item's shortcut collide with the menu's own reserved
+/// binding, no matter how the shortcut is expressed. So this item uses ⌘/ instead — the same
+/// physical key, unshifted, with no system collision — which is the best available stand-in for
+/// the spec's ⌘? intent. The bare `?` key (below, via `PerformerInputMonitor`) still opens the same
+/// window and remains the fast path regardless of which chord the menu carries.
+private struct ControlsReferenceCommands: Commands {
+  @Environment(\.openWindow) private var openWindow
+
+  var body: some Commands {
+    CommandGroup(replacing: .help) {
+      Button("Feedbax Controls") { openWindow(id: FeedbaxWindow.referenceID) }
+        .keyboardShortcut("/", modifiers: .command)
+    }
   }
 }
 
 /// The instrument's whole window layout, shared verbatim by both entry points so `swift run`
-/// and `Feedbax.app` cannot drift (design §8). Two `Window` scenes rather than `WindowGroup`s:
+/// and `Feedbax.app` cannot drift (design §8). Three `Window` scenes rather than `WindowGroup`s:
 /// `Window` is single-instance and gets a Window-menu entry for free, so a closed window can
 /// always be brought back (spec goal 3).
 ///
@@ -90,10 +124,19 @@ public struct FeedbaxScenes: Scene {
       OutputWindowContent(host: bootstrap.host)
     }
     .defaultSize(width: 1280, height: 720)
+    .commands { ControlsReferenceCommands() }
 
     Window("Controls", id: FeedbaxWindow.controlsID) {
       ControlsWindowContent(viewModel: bootstrap.viewModel)
     }
-    .defaultSize(width: 720, height: 800)
+    .defaultSize(width: 760, height: 900)
+
+    // The reference gets a Window-menu entry and frame restoration for free, like the other
+    // two (design §8.2).
+    Window("Controls Reference", id: FeedbaxWindow.referenceID) {
+      ControlsReferenceView(vm: bootstrap.viewModel)
+        .frame(minWidth: 420, minHeight: 360)
+    }
+    .defaultSize(width: 560, height: 640)
   }
 }

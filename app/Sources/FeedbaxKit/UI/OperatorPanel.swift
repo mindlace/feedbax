@@ -53,6 +53,12 @@ public struct OperatorPanel: View {
     (.saturation, "SATURATION"),
   ]
 
+  /// The image layer's four live axes (design §4) — reachable here even when neither pad is
+  /// assigned to them. Upper-case to sit beside the original's shader labels.
+  private static let layerSliderLabels: [(LayerAxis, String)] = [
+    (.x, "IMAGE X"), (.y, "IMAGE Y"), (.scale, "IMAGE SCALE"), (.rotate, "IMAGE ROTATE"),
+  ]
+
   /// Two plain columns (the brief's own words) via `HStack`, not another `HSplitView` — the
   /// draggable-divider split is reserved for the outer preview/panel layout in
   /// `feedbax-dev/main.swift`; nesting a second one here would give the operator two resize
@@ -97,12 +103,26 @@ public struct OperatorPanel: View {
       .frame(minWidth: 260, idealWidth: 300)
 
       Form {
+        // The original's two Mira pads (spec §04 §1.2–1.3), each assignable to any two live
+        // axes; defaults come from the bindings table (design §7).
+        Section("Surfaces") {
+          HStack(alignment: .top, spacing: 16) {
+            ForEach(Array(vm.bindings.pads.indices), id: \.self) { index in
+              padColumn(index)
+            }
+          }
+        }
+
         Section("Layer Source") {
           Picker("Mode", selection: Binding(get: { vm.layerMode }, set: { vm.setLayerMode($0) })) {
             Text("Sticker").tag(LayerMode.sticker)
             Text("Movie").tag(LayerMode.movie)
           }
           .pickerStyle(.segmented)
+
+          ForEach(Self.layerSliderLabels, id: \.0) { axis, label in
+            slider(label, axis: .layer(axis))
+          }
 
           if vm.layerMode == .sticker {
             Stepper(
@@ -172,20 +192,48 @@ public struct OperatorPanel: View {
   }
 
   private func slider(_ label: String, slot: ControlSlot) -> some View {
-    let raw = vm.sliderValues[slot] ?? 0
+    slider(label, axis: .slot(slot))
+  }
+
+  private func slider(_ label: String, axis: ControlAxis) -> some View {
+    let raw = vm.axisValues[axis] ?? 0
+    // Slot faders show the original panel's reading (EngineViewModel.maxPanelValue); layer
+    // axes had no Max fader, so they show the raw value.
+    let readout: Double
+    if case .slot(let slot) = axis { readout = EngineViewModel.maxPanelValue(for: slot, raw: raw) } else { readout = raw }
     return LabeledContent(label) {
       HStack(spacing: 8) {
-        Slider(
-          value: Binding(get: { vm.sliderValues[slot] ?? 0 }, set: { vm.slider(slot, changedTo: $0) }),
-          in: EngineViewModel.range(for: slot)
-        )
-        // The original panel's reading for this fader (its number boxes show the slider's
-        // internal value, not the sent one) — see EngineViewModel.maxPanelValue.
-        Text(String(format: "%.2f", EngineViewModel.maxPanelValue(for: slot, raw: raw)))
+        Slider(value: axisBinding(axis), in: EngineViewModel.range(for: axis))
+        Text(String(format: "%.2f", readout))
           .monospacedDigit()
           .foregroundStyle(.secondary)
           .frame(width: 44, alignment: .trailing)
       }
     }
+  }
+
+  private func axisBinding(_ axis: ControlAxis) -> Binding<Double> {
+    Binding(get: { vm.axisValues[axis] ?? 0 }, set: { vm.axis(axis, changedTo: $0) })
+  }
+
+  private func padColumn(_ index: Int) -> some View {
+    let pad = vm.bindings.pads[index]
+    return VStack(spacing: 6) {
+      XYPad(x: axisBinding(pad.x), y: axisBinding(pad.y),
+            xRange: EngineViewModel.range(for: pad.x), yRange: EngineViewModel.range(for: pad.y))
+        .frame(width: 160, height: 160)
+      axisPicker("X", selection: pad.x) { vm.setPadAxis(pad: index, .x, to: $0) }
+      axisPicker("Y", selection: pad.y) { vm.setPadAxis(pad: index, .y, to: $0) }
+    }
+  }
+
+  private func axisPicker(_ label: String, selection: ControlAxis,
+                          onChange: @escaping (ControlAxis) -> Void) -> some View {
+    Picker(label, selection: Binding(get: { selection }, set: onChange)) {
+      ForEach(ControlAxis.live, id: \.self) { axis in
+        Text(axis.displayName).tag(axis)
+      }
+    }
+    .frame(width: 160)
   }
 }

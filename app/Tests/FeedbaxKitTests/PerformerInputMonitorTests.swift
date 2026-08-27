@@ -15,8 +15,9 @@ import AppKit
 /// the fullscreen block) that could silently drift from `handle(_:)` — several review-driven
 /// fixes had landed only in `handle(_:)`, leaving `handleKey` behind.
 ///
-/// Virtual key codes below are the standard ANSI ones: Escape 53, `f` 3, `i` 34, `e` 14 — `i`
-/// and `f` are bound in `DefaultBindings.json` (`sInvert`, `fullscreen`); `e` is not.
+/// Virtual key codes below are the standard ANSI ones: Escape 53, `f` 3, `i` 34, `e` 14,
+/// `?` 44 (Shift-/) — `i` and `f` are bound in `DefaultBindings.json` (`sInvert`, `fullscreen`);
+/// `e` is not.
 ///
 /// Every event below carries a real window's `windowNumber`, never `0`: `handle(_:)` falls
 /// back to `NSApp.keyWindow` when `event.window` is nil, and `NSApp` is the implicitly-
@@ -184,6 +185,143 @@ final class PerformerInputMonitorTests: XCTestCase {
     XCTAssertTrue(PerformerInputMonitor.isTextEditor(NSTextField()))
     XCTAssertFalse(PerformerInputMonitor.isTextEditor(NSView()))
     XCTAssertFalse(PerformerInputMonitor.isTextEditor(nil))
+  }
+
+  // MARK: - Pointer gestures (design §6.2) and the help key (design §8.3)
+
+  func testGestureModifiersExtractOptionAndShiftAndRejectCommandControl() {
+    XCTAssertEqual(PerformerInputMonitor.gestureModifiers([]), [])
+    XCTAssertEqual(PerformerInputMonitor.gestureModifiers(.option), [.option])
+    XCTAssertEqual(PerformerInputMonitor.gestureModifiers(.shift), [.shift])
+    XCTAssertEqual(PerformerInputMonitor.gestureModifiers([.option, .shift]), [.option, .shift])
+    XCTAssertNil(PerformerInputMonitor.gestureModifiers(.command), "Cmd-gesture is never the performer's")
+    XCTAssertNil(PerformerInputMonitor.gestureModifiers([.control, .option]))
+    XCTAssertEqual(PerformerInputMonitor.gestureModifiers([.option, .capsLock]), [.option],
+                   "device-independent noise like Caps Lock is ignored")
+  }
+
+  func testGesturePhaseMapsNSEventPhase() {
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase(.began), .began)
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase(.changed), .changed)
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([]), .changed, "stationary events count as changes")
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase(.ended), .ended)
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase(.cancelled), .cancelled)
+  }
+
+  /// A momentum scroll — the flick that keeps coasting after the fingers lift — reports
+  /// `phase == []` and carries its whole lifecycle in `momentumPhase` instead. Reading only
+  /// `phase` made every coasting event a `.changed`, which re-claimed `GestureLock` for
+  /// `.scroll` with no `.ended` ever following: the lock stayed claimed and silently discarded
+  /// every later pinch/twist (design §6.3, final-review finding 1).
+  func testMomentumPhaseCarriesTheLifecycleWhenPhaseIsEmpty() {
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([], momentum: .began), .changed,
+                   "the fingers are already up — the real scroll began the sequence")
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([], momentum: .changed), .changed)
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([], momentum: .ended), .ended,
+                   "coasting stops: the only release the lock will ever see")
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([], momentum: .cancelled), .cancelled)
+  }
+
+  /// `NSEvent.Phase` is an `OptionSet`, so more than one bit can be set at once. Terminal bits
+  /// win over `.began` so a release is never lost (Task 6's deferred minor, now covered).
+  func testGesturePhaseCombinedBitsPreferTheTerminalPhase() {
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([.began, .ended]), .ended)
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([.ended, .cancelled]), .cancelled)
+  }
+
+  func testRotationIsNormalisedSoHalfATurnSpansTheRange() {
+    XCTAssertEqual(PerformerInputMonitor.normalizedRotation(90), 0.5, accuracy: 1e-6)
+    XCTAssertEqual(PerformerInputMonitor.normalizedRotation(-180), -1, accuracy: 1e-6)
+  }
+
+  func testHelpKeyDecision() {
+    XCTAssertTrue(PerformerInputMonitor.decideHelpKey(firstResponderIsTextEditor: false, characters: "?", chordFlags: .shift),
+                  "Shift-/ on a US layout")
+    XCTAssertTrue(PerformerInputMonitor.decideHelpKey(firstResponderIsTextEditor: false, characters: "?", chordFlags: []),
+                  "layouts with an unshifted ?")
+    XCTAssertFalse(PerformerInputMonitor.decideHelpKey(firstResponderIsTextEditor: true, characters: "?", chordFlags: .shift),
+                   "typing ? into the preset-name field")
+    XCTAssertFalse(PerformerInputMonitor.decideHelpKey(firstResponderIsTextEditor: false, characters: "?", chordFlags: .command),
+                   "⌘? is the menu item's own shortcut — leave it to the menu")
+    XCTAssertFalse(PerformerInputMonitor.decideHelpKey(firstResponderIsTextEditor: false, characters: "/", chordFlags: []))
+  }
+
+  func testQuestionMarkPostsTheShowReferenceNotificationAndIsConsumed() {
+    let window = makeRecordingWindow()
+    let (monitor, surface) = makeMonitor(window: window)
+    let posted = expectation(forNotification: .feedbaxShowControlsReference, object: nil)
+    let event = keyEvent(window: window, characters: "?", keyCode: 44, modifierFlags: .shift)
+    XCTAssertEqual(monitor.handle(event), .forward)
+    wait(for: [posted], timeout: 1)
+    XCTAssertNil(surface.poll(0), "? is an app action, never a control write")
+  }
+
+  /// A drag event with a real content height (the normaliser divides by it) — `RecordingWindow`
+  /// is built on a zero rect, so these tests need their own.
+  private func makeDragWindow() -> NSWindow {
+    NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 200), styleMask: [],
+             backing: .buffered, defer: false)
+  }
+
+  private func dragEvent(window: NSWindow, modifierFlags: NSEvent.ModifierFlags = []) -> NSEvent {
+    NSEvent.mouseEvent(with: .leftMouseDragged, location: NSPoint(x: 10, y: 10),
+                       modifierFlags: modifierFlags, timestamp: 0, windowNumber: window.windowNumber,
+                       context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+  }
+
+  func testPlainDragInTheOutputWindowIsForwarded() {
+    let window = makeDragWindow()
+    let (monitor, _) = makeMonitor(window: window)
+    XCTAssertEqual(monitor.handle(dragEvent(window: window)), .forward,
+                   "design §6.1: plain drag is the one-finger pan gesture")
+  }
+
+  func testShiftDragIsForwardedAndOptionShiftDragPassesThrough() {
+    let window = makeDragWindow()
+    let (monitor, _) = makeMonitor(window: window)
+    XCTAssertEqual(monitor.handle(dragEvent(window: window, modifierFlags: .shift)), .forward)
+    XCTAssertEqual(monitor.handle(dragEvent(window: window, modifierFlags: [.option, .shift])), .passThrough,
+                   "no row for Option+Shift — never swallowed")
+    XCTAssertEqual(monitor.handle(dragEvent(window: window, modifierFlags: .command)), .passThrough)
+  }
+
+  func testDragOutsideTheOutputWindowPassesThrough() {
+    let output = makeDragWindow()
+    let other = makeDragWindow()
+    let (monitor, _) = makeMonitor(window: output)
+    XCTAssertEqual(monitor.handle(dragEvent(window: other)), .passThrough)
+  }
+
+  /// Review finding: `forward` used to gate every pointer event, including `.ended`/`.cancelled`,
+  /// on `surface.handles(gesture, modifiers:)`. A performer who changes the held modifier
+  /// between claiming a two-finger gesture and lifting off sends a terminal event whose CURRENT
+  /// modifier combo may be unbound — `rotate`+Shift has no row in `DefaultBindings.json`. If that
+  /// terminal event passed through instead of reaching the surface, `GestureLock` never saw the
+  /// `.ended` and stayed `.claimed(.rotate)` forever, silently discarding every later gesture of
+  /// a different kind. `decideGesture` is `forward(...)`'s consume/pass-through decision pulled
+  /// out pure, since scroll/rotate `NSEvent`s cannot be synthesized in this headless test
+  /// process (design §6.3: the winner's `.ended`/`.cancelled` must always reach the lock).
+  func testDecideGestureLetsTerminalPhasesThroughEvenWhenUnbound() {
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: true, modifiers: [.option],
+                                          phase: .changed, isBound: true),
+      .forward, "bound + changed forwards normally")
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: true, modifiers: [.shift],
+                                          phase: .changed, isBound: false),
+      .passThrough, "unbound + changed is not this surface's business")
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: true, modifiers: [.shift],
+                                          phase: .ended, isBound: false),
+      .forward, "a lift-off must reach the lock even on an unbound modifier combo")
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: true, modifiers: nil,
+                                          phase: .ended, isBound: false),
+      .passThrough, "a Command/Control chord (nil modifiers) is never ours, terminal or not")
+    XCTAssertEqual(
+      PerformerInputMonitor.decideGesture(eventIsInOutputWindow: false, modifiers: [.shift],
+                                          phase: .ended, isBound: false),
+      .passThrough, "outside the output window, nothing is ours regardless of phase")
   }
 
 }

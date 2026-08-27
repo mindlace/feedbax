@@ -2,15 +2,11 @@ import Foundation
 
 /// The performer's day-one input path (design §5 baseline-local-input): local keyboard and
 /// trackpad, driven entirely by `Bindings` — no exotic hardware required for P1. Task 19/20
-/// forward real `NSEvent`s into `keyDown`/`scroll`/`magnify`/`modifiedDrag`; tests call them
-/// directly.
+/// forward real `NSEvent`s into `keyDown`/`gesture`; tests call them directly.
 ///
 /// Two kinds of state, matching the two kinds of thing a performer does with this surface:
-/// - **Accumulators** (`panX`/`panY`/`zoom`/`hue`/`theta`) behave like the original's sliders
-///   — a gesture nudges a held position, clamped to −1...1, and `poll` asserts that position
-///   the frame it CHANGES (mirrors every other surface's message-on-change contract — see
-///   `lastAsserted`'s own doc comment for why "keeps asserting every frame while nonzero," this
-///   type's original behavior, was a bug, not a feature).
+/// - **Gesture deltas** are gathered per axis and resolved against router truth at poll time
+///   (design §5) — a gesture nudges the axis from wherever it actually is.
 /// - **Toggles and the erase step** are one-shot events: `poll` hands back whatever queued
 ///   since the last call and drains the queue, same as the original's hard cuts.
 public final class KeyboardTrackpadSurface: ControlSurface {
@@ -25,27 +21,13 @@ public final class KeyboardTrackpadSurface: ControlSurface {
   /// always had.
   private let stateSnapshot: ControlStateSnapshot
 
-  /// Held position per trackpad-bound slot, clamped −1...1 — the raw range shared by every
-  /// slot these three gestures touch (`ControlRouter.mappedTarget`: hue/panX/panY/zoom/theta
-  /// all map from −1...1). Sparse: a slot only appears once a gesture has touched it, which
-  /// is also how `poll`'s partial write ("only touched slots," design §5) falls out for free
-  /// — nothing here for an untouched slot to filter.
-  private var accumulators: [ControlSlot: Float] = [:]
-
-  /// What `poll` last ASSERTED for each slot (not the last raw gesture) — final review finding
-  /// 2: `poll` previously reasserted every nonzero accumulator on EVERY call, which meant a
-  /// touched slot's held value permanently overrode whatever the gamepad or operator panel
-  /// wrote to that same slot afterward (surface order is `[keyboard, gamepad, viewModel]`;
-  /// later surfaces are only supposed to win TIES within a frame, not lose to a stale earlier
-  /// one on every subsequent frame). `ControlRouter.rawSlots` already holds a slot's value
-  /// between frames on its own — this surface only needs to assert a CHANGE, exactly like
-  /// `GamepadSurface`'s edge-triggered buttons/d-pad and `EngineViewModel`'s "asserted once
-  /// then drained" sliders (that method's own doc comment). Diffing the ACCUMULATOR against
-  /// this, not against the previous accumulator snapshot directly, is what makes a gesture that
-  /// nudges a slot back to a value it already held (e.g. a scroll that overshoots and corrects)
-  /// correctly assert nothing on the second poll — same "diff the target, not the input"
-  /// principle `ControlRouter.lastRampTarget` uses for ramp retargeting.
-  private var lastAsserted: [ControlSlot: Float] = [:]
+  /// Deltas gathered since the last `poll`, per axis. NOT a held position (design §5): the
+  /// surface used to keep its own accumulator per slot and nudge THAT, so after the operator
+  /// panel or a preset moved a slot, the next trackpad nudge asserted "stale accumulator +
+  /// delta" and snapped the value back. `poll` now resolves each delta against
+  /// `stateSnapshot.rawValue` — the router's truth at that moment — which is the same
+  /// "read truth at poll time" ruling finding 4 established for toggles.
+  private var pendingDeltas: [ControlAxis: Float] = [:]
 
   /// Toggle TEMPLATES queued by `keyDown` since the last `poll` — deliberately NOT yet resolved
   /// to a concrete on/off Bool. Resolution happens in `poll`, via `resolveToggles`, against
@@ -62,7 +44,14 @@ public final class KeyboardTrackpadSurface: ControlSurface {
   /// table's "key → ToggleEvent" shape without widening that contract past what Task 13 needs.
   private var pendingEraseStep: Float?
 
-  private static let eraseStepMagnitude: Float = 0.05
+  /// Internal rather than private so `ControlReference.fixedKeyRows` can spell the `[`/`]`
+  /// rows from the very constant those keys apply, instead of a literal that can drift from it
+  /// (design §8.1 — the reference IS the keys).
+  static let eraseStepMagnitude: Float = 0.05
+
+  /// Arbitrates between simultaneously-delivered two-finger gestures (design §6.3, Task 5) —
+  /// see `GestureLock`'s own doc comment for why this needs to exist at all.
+  private var lock = GestureLock()
 
   public init(bindings: Bindings, stateSnapshot: ControlStateSnapshot = .constant(false)) {
     self.bindings = bindings
@@ -90,38 +79,58 @@ public final class KeyboardTrackpadSurface: ControlSurface {
     pendingToggleTemplates.append(template)
   }
 
-  /// Two-finger drag — the original's shader-pan touch role (design §5).
-  public func scroll(dx: Float, dy: Float) {
-    accumulate(dx, into: bindings.trackpad.panX)
-    accumulate(dy, into: bindings.trackpad.panY)
+  /// Whether the bindings table has a row for this exact gesture + modifier set —
+  /// `PerformerInputMonitor`'s consume/pass-through decision for pointer events, mirroring
+  /// `handles(_ key:)`: an unbound combination is never swallowed.
+  public func handles(_ gesture: TrackpadGesture, modifiers: Set<GestureModifier>) -> Bool {
+    bindings.trackpadBinding(for: gesture, modifiers: modifiers) != nil
   }
 
-  /// Pinch/magnify.
-  public func magnify(_ delta: Float) {
-    accumulate(delta, into: bindings.trackpad.zoom)
+  /// One normalised gesture event (design §6.4). Unbound → no-op, same as an unbound key.
+  public func gesture(_ event: GestureEvent) {
+    // A lift-off must reach the lock even when this event's modifiers are unbound (design
+    // §6.3) — otherwise a modifier change at the end of a claimed gesture leaves the lock
+    // claimed forever.
+    if event.phase.isTerminal {
+      _ = lock.admit(event)
+      return   // nothing to apply: terminal events carry no delta
+    }
+    guard let binding = bindings.trackpadBinding(for: event.gesture, modifiers: event.modifiers) else { return }
+    // Bound gestures only reach the lock — an unbound combination the monitor let through
+    // (or a test fed directly) must not claim a sequence nothing will ever end.
+    guard lock.admit(event) else { return }
+    switch binding.target {
+    case .xy(let x, let y):
+      nudge(event.delta.x, along: x)
+      nudge(event.delta.y, along: y)
+    case .single(let axis):
+      nudge(event.delta.x, along: axis)
+    }
   }
 
-  /// Option-held drag: x → hue, y → theta.
-  public func modifiedDrag(dx: Float, dy: Float) {
-    accumulate(dx, into: bindings.trackpad.hue)
-    accumulate(dy, into: bindings.trackpad.theta)
+  private func nudge(_ delta: Float, along axis: TrackpadAxis) {
+    pendingDeltas[axis.axis, default: 0] += delta * axis.sensitivity
   }
 
   public func poll(_ time: TimeInterval) -> ControlWrite? {
-    // Message-on-change (finding 2): only a slot whose accumulator differs from what was last
-    // ASSERTED goes out this poll — see `lastAsserted`'s own doc comment.
-    var slots: [ControlSlot: Float] = [:]
-    for (slot, value) in accumulators where lastAsserted[slot] != value {
-      slots[slot] = value
-      lastAsserted[slot] = value
+    // Each pending delta lands on the router's CURRENT raw value, clamped to the axis range,
+    // and is asserted only if that actually moves it — message-on-change falls out of the
+    // comparison (a nudge into a clamp, or one that overshoots and corrects back within one
+    // frame, asserts nothing).
+    var axes: [ControlAxis: Float] = [:]
+    for (axis, delta) in pendingDeltas {
+      let truth = stateSnapshot.rawValue(axis)
+      let next = axis.clamped(truth + delta)
+      if next != truth { axes[axis] = next }
     }
+    pendingDeltas = [:]
     let toggles = resolveToggles()
     let eraseStep = pendingEraseStep
     pendingEraseStep = nil
-    if slots.isEmpty && toggles.isEmpty && eraseStep == nil {
+    if axes.isEmpty && toggles.isEmpty && eraseStep == nil {
       return nil   // assert nothing this frame — ControlRouter falls through (spec §04 §1.2)
     }
-    return ControlWrite(slots: slots, toggles: toggles, eraseStep: eraseStep)
+    return ControlWrite(axes: axes, toggles: toggles, eraseStep: eraseStep)
   }
 
   /// Resolves every queued template into a concrete on/off `ToggleEvent`, chained against
@@ -146,10 +155,5 @@ public final class KeyboardTrackpadSurface: ControlSurface {
     }
     pendingToggleTemplates = []
     return resolved
-  }
-
-  private func accumulate(_ delta: Float, into axis: TrackpadAxis) {
-    let current = accumulators[axis.slot] ?? 0
-    accumulators[axis.slot] = min(1, max(-1, current + delta * axis.sensitivity))
   }
 }

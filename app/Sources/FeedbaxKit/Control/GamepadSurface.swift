@@ -75,6 +75,29 @@ public final class GamepadSurface: ControlSurface {
   /// Test seam (Task 14): nil → live `GCController.controllers().first?.extendedGamepad`.
   public var stateProvider: (() -> GamepadState?)?
 
+  /// The mapping in this type's doc comment, as reference rows for the Controls Reference
+  /// window (design §8.1). Gamepad bindings stay code-defined (design §5 deferred moving them
+  /// to JSON), so this table lives beside the code it describes; `ControlReferenceTests`
+  /// checks it names every input `poll` reads. Axis names come from `ControlAxis.displayName`
+  /// so a rename there flows here.
+  public static let reference: [ControlReference.Row] = [
+    .init(input: "Left stick", modifiers: "",
+          action: "\(ControlAxis.slot(.panX).displayName) / \(ControlAxis.slot(.panY).displayName)", kind: "axes"),
+    .init(input: "Right stick", modifiers: "",
+          action: "\(ControlAxis.slot(.hue).displayName) / \(ControlAxis.slot(.bias).displayName)", kind: "axes"),
+    .init(input: "Right trigger", modifiers: "", action: ControlAxis.slot(.zoom).displayName, kind: "axis"),
+    .init(input: "Left trigger", modifiers: "", action: ControlAxis.slot(.theta).displayName, kind: "axis"),
+    .init(input: "D-pad up / down", modifiers: "",
+          action: "Erase +\(ControlReference.stepText(GamepadSurface.eraseStepMagnitude)) / −\(ControlReference.stepText(GamepadSurface.eraseStepMagnitude))", kind: "step"),
+    .init(input: "D-pad right / left", modifiers: "",
+          action: "\(ControlAxis.slot(.saturation).displayName) +\(ControlReference.stepText(GamepadSurface.saturationStepMagnitude)) / −\(ControlReference.stepText(GamepadSurface.saturationStepMagnitude))", kind: "step"),
+    .init(input: "A", modifiers: "", action: ToggleEvent.sInvert(true).displayName, kind: "toggle"),
+    .init(input: "B", modifiers: "", action: ToggleEvent.layerEnabled(true).displayName, kind: "toggle"),
+    .init(input: "X", modifiers: "", action: ToggleEvent.wave1Enabled(true).displayName, kind: "toggle"),
+    .init(input: "Y", modifiers: "", action: ToggleEvent.wave2Enabled(true).displayName, kind: "toggle"),
+    .init(input: "Menu", modifiers: "", action: ToggleEvent.fullscreen.displayName, kind: "one-shot"),
+  ]
+
   private static let stickDeadzone: Float = 0.08
   /// Triggers share the sticks' deadzone magnitude rather than getting a bespoke constant: both
   /// are the same class of analog input (spring-loaded, GC framework applies no deadzone of its
@@ -83,6 +106,8 @@ public final class GamepadSurface: ControlSurface {
   /// `.theta` on a literal `!= 0` test, so a trigger resting at any tiny nonzero value (spring
   /// slop, sensor noise) pinned those slots forever and could clobber another surface's write.
   private static let triggerDeadzone: Float = stickDeadzone
+  /// The reference window shows the step the d-pad actually applies by reading these very
+  /// constants through `ControlReference.stepText`, so the two cannot drift (design §8.1).
   private static let eraseStepMagnitude: Float = 0.05
   private static let saturationStepMagnitude: Float = 0.1
   /// GC d-pad axes report as effectively digital (−1/0/1 floats); this just needs to sit

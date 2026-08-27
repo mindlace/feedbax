@@ -5,23 +5,25 @@ import simd
 
 /// The operator's SwiftUI-facing model (Task 20; design §5's `ControlSurface` section). The
 /// load-bearing design choice: **this is a `ControlSurface` like `KeyboardTrackpadSurface` or
-/// `GamepadSurface`, not a privileged back door into `Engine`.** A slider move calls `slider
-/// (_:changedTo:)`, which queues a slot write exactly the way a key press queues one in
+/// `GamepadSurface`, not a privileged back door into `Engine`.** A slider move calls `axis
+/// (_:changedTo:)`, which queues an axis write exactly the way a key press queues one in
 /// `KeyboardTrackpadSurface` — `ControlRouter.tick` polls this object in `surfaces` order and
 /// arbitrates last-write-wins with every other surface, same as any of them (spec §04 §1.2).
 /// `OperatorPanel` (the SwiftUI view) never touches `Engine`/`ControlRouter` directly; it only
 /// ever calls methods on this object.
 ///
 /// Two kinds of state cross this boundary, matching the two kinds of thing the panel does:
-/// - **Slot writes and toggles** go through `poll`, queued and drained exactly once — see that
-///   method's own comment for why this differs from `KeyboardTrackpadSurface`'s "keep asserting
-///   while held" accumulators.
-/// - **Everything else the panel controls is not part of the 9-slot vector at all** — erase
+/// - **Axis writes and toggles** go through `poll`, queued and drained exactly once — see that
+///   method's own comment for why this differs from `KeyboardTrackpadSurface`, which resolves
+///   pending deltas against live truth every frame. "Axis", not "slot": since the layer channel
+///   landed (design §3–§4) a `ControlWrite` addresses `ControlAxis`, whose 11 live cases
+///   (`ControlAxis.live`) are the 7 driven shader slots plus the image layer's 4.
+/// - **Everything else the panel controls is not a `ControlAxis` at all** — erase
 ///   (a direct `ControlRouter.eraseControl` write, spec §01 §2's "never ramped, never a slot"),
 ///   layer mode, sticker selection, movie loading, resolution/rate, and presets. Those go
-///   straight to `Engine`/`PresetStore` because there is no `ToggleEvent`/`ControlSlot` for them
+///   straight to `Engine`/`PresetStore` because there is no `ToggleEvent`/`ControlAxis` for them
 ///   to ride — `ControlWrite` only carries what a *performer gesture* can assert mid-show; a
-///   file picker or a resolution change is a setup action, not a slot.
+///   file picker or a resolution change is a setup action, not an axis.
 ///
 /// `engine`/`presetStore` are optional, defaulted to `nil`, specifically so `EngineViewModel()`
 /// — the bare initializer the unit tests use — builds a fully testable `ControlSurface` with no
@@ -41,51 +43,39 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   public weak var engine: Engine?
   public var presetStore: PresetStore?
 
-  // MARK: - Slot writes (the 7 live sliders; `.scalebright`/`.nc` are dead — ControlVector.swift)
+  // MARK: - Axis writes (the 7 live sliders, the 4 layer sliders, and both pads — design §7)
 
-  private var pendingSlots: [ControlSlot: Float] = [:]
+  private var pendingAxes: [ControlAxis: Float] = [:]
   private var pendingToggles: [ToggleEvent] = []
 
-  /// Mirrors `pendingSlots` for SwiftUI binding — `slider(_:changedTo:)` is the single entry
-  /// point both a real drag gesture AND a `Binding`'s `set` closure call, so the displayed
-  /// value and the queued write can never disagree (the brief's "`@Published` mirrors ... call
-  /// the same entry points").
-  @Published public private(set) var sliderValues: [ControlSlot: Double] = [
-    .hue: 0, .bias: 0, .panX: 0, .panY: 0, .zoom: 0, .theta: 0, .saturation: 0,
-  ]
+  /// Mirror of every live axis for SwiftUI binding. `axis(_:changedTo:)` is the single entry
+  /// point a slider drag, a pad drag, and a test all call, so the displayed value and the
+  /// queued write can never disagree; `refreshMirrorsFromTruth` keeps it following the router
+  /// so a trackpad gesture or a preset recall moves the widgets too (design §7).
+  @Published public private(set) var axisValues: [ControlAxis: Double] = {
+    var mirror: [ControlAxis: Double] = [:]
+    for axis in ControlAxis.live { mirror[axis] = 0 }
+    return mirror
+  }()
 
-  /// The 7 slots a slider actually controls — `.scalebright`/`.nc` are dead (ControlVector.swift)
-  /// and never get a mirror entry. Shared by `init` (seeds from `engine.router.rawSlots`) and
-  /// `recallPreset` (seeds from `preset.slots`) — both are a raw 9-float array indexed by
-  /// `ControlSlot.rawValue` (`ControlRouter.rawSlots`'s own doc comment; `Preset.slots`' doc
-  /// comment says the same), so one conversion serves both call sites.
-  private static let liveSlots: [ControlSlot] = [.hue, .bias, .panX, .panY, .zoom, .theta, .saturation]
-
-  private static func sliderMirror(from rawSlots: [Float]) -> [ControlSlot: Double] {
-    var mirror: [ControlSlot: Double] = [:]
-    for slot in liveSlots { mirror[slot] = Double(rawSlots[slot.rawValue]) }
+  private static func axisMirror(from router: ControlRouter) -> [ControlAxis: Double] {
+    var mirror: [ControlAxis: Double] = [:]
+    for axis in ControlAxis.live { mirror[axis] = Double(router.rawValue(for: axis)) }
     return mirror
   }
 
-  /// Called by a slider drag (or a test). Queues the write for the next `poll` and updates the
-  /// mirror immediately — the mirror must not wait for a router round trip, or the slider
-  /// would visibly lag the hand dragging it.
-  public func slider(_ slot: ControlSlot, changedTo value: Double) {
-    sliderValues[slot] = value
-    pendingSlots[slot] = Float(value)
+  /// Called by a slider or pad drag (or a test). Queues the write for the next `poll` and
+  /// updates the mirror immediately — the mirror must not wait for a router round trip, or
+  /// the widget would visibly lag the hand dragging it.
+  public func axis(_ axis: ControlAxis, changedTo value: Double) {
+    axisValues[axis] = value
+    pendingAxes[axis] = Float(value)
   }
 
-  /// Centralizes every slider's range (the brief's step 3) so `OperatorPanel` never hardcodes
-  /// one: `.saturation` is the one unipolar slot (spec §04 §1.2's row 8 — "pass-through 0..1,
-  /// unipolar slider"); everything else the original wires as a bipolar `slider[...]` widget is
-  /// −1...1 (spec §04 §1.2 rows 0/1/5/6, plus panX/panY's touch-driven −1..1 range, row 3/4).
-  /// Dead slots (`.scalebright`/`.nc`) get a range too, for an exhaustive switch, even though
-  /// `OperatorPanel` never surfaces a control for them.
-  public static func range(for slot: ControlSlot) -> ClosedRange<Double> {
-    switch slot {
-    case .saturation: return 0.0...1.0
-    default: return -1.0...1.0
-    }
+  /// Every widget's range in one place, from `ControlAxis.rawRange` (design §3.1), so
+  /// `OperatorPanel` never hardcodes one.
+  public static func range(for axis: ControlAxis) -> ClosedRange<Double> {
+    Double(axis.rawRange.lowerBound)...Double(axis.rawRange.upperBound)
   }
 
   /// The number the original's panel shows for a slot. Its faders are `slider` widgets with
@@ -129,8 +119,10 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
 
   // MARK: - ControlSurface
 
-  /// Drains the queue built up since the last call — unlike `KeyboardTrackpadSurface`'s held
-  /// accumulators (which keep reasserting a slot's position every frame while it's nonzero),
+  /// Drains the queue built up since the last call. `KeyboardTrackpadSurface` no longer keeps
+  /// accumulators of its own (design §5): it holds *pending deltas* and resolves them against
+  /// the router's truth at poll time. This surface is one step simpler still, because it has
+  /// an absolute value to assert rather than a relative nudge —
   /// a slider's write is a one-shot assertion: the performer moved it to X, the router should
   /// glide there, and nothing needs re-asserting next frame just because a fader sits still
   /// (the brief's own test name: "asserted once then drained"). Returning `nil` once nothing is
@@ -149,9 +141,9 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     // pending write), since truth can move for reasons that have nothing to do with this
     // object's own queue.
     refreshMirrorsFromTruth()
-    let slots = pendingSlots
+    let axes = pendingAxes
     let toggles = pendingToggles
-    pendingSlots = [:]
+    pendingAxes = [:]
     pendingToggles = []
     // `refreshMirrorsFromTruth` just read the router/engine as of BEFORE this write reaches
     // them (the caller — `ControlRouter.tick` — applies `toggles` only after this method
@@ -162,8 +154,11 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     // type's own doc comment). Reapplying `toggles` on top of the truth read keeps that
     // contract intact while still picking up flips from OTHER surfaces.
     applyOptimistically(toggles)
-    if slots.isEmpty && toggles.isEmpty { return nil }
-    return ControlWrite(slots: slots, toggles: toggles)
+    // Same reasoning as the toggles: the truth read above predates THIS write, so put our own
+    // just-queued values back on top or a slider mid-drag flickers to the old value for a tick.
+    for (axis, value) in axes { axisValues[axis] = Double(value) }
+    if axes.isEmpty && toggles.isEmpty { return nil }
+    return ControlWrite(axes: axes, toggles: toggles)
   }
 
   /// The read side of finding 4's single-owner fix — see `poll`'s call site for why this runs
@@ -191,6 +186,10 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     if waveBumpOn != newWaveBumpOn { waveBumpOn = newWaveBumpOn }
     let newKittyBumpOn = engine.bumpsEnabled.kitty
     if kittyBumpOn != newKittyBumpOn { kittyBumpOn = newKittyBumpOn }
+    for axis in ControlAxis.live {
+      let value = Double(engine.router.rawValue(for: axis))
+      if axisValues[axis] != value { axisValues[axis] = value }
+    }
     let newEraseValue = Double(engine.router.eraseControl)
     if eraseValue != newEraseValue { eraseValue = newEraseValue }
   }
@@ -213,7 +212,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     }
   }
 
-  // MARK: - Erase (spec §01 §2: outside the 9-slot vector, never ramped, never a `ControlWrite`
+  // MARK: - Erase (spec §01 §2: not a `ControlAxis` at all, never ramped, never a `ControlWrite`
   // field for this surface — a slider position is an absolute "here is where TRANSPARANCY sits
   // now," not `KeyboardTrackpadSurface`'s relative `[`/`]` nudge, so it writes `eraseControl`
   // directly rather than round-tripping through `ControlWrite.eraseStep`)
@@ -322,7 +321,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     guard let engine, let presetStore, let preset = try? presetStore.load(name: name) else { return }
     engine.applyPreset(preset, at: CACurrentMediaTime())
     presetName = preset.name
-    sliderValues = Self.sliderMirror(from: preset.slots)
+    axisValues = Self.axisMirror(from: engine.router)
     layerMode = engine.layerMode
     eraseValue = Double(engine.router.eraseControl)
     stickerIndex = engine.sticker.selectedIndex
@@ -353,26 +352,54 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   /// in that path any more, so the toggle talks to the host directly.
   public weak var host: EngineHost?
 
+  // MARK: - Pads (design §7): two absolute XY surfaces, each assignable to any two live axes
+
+  /// Which pad axis a picker changes.
+  public enum PadAxis { case x, y }
+
+  /// The live bindings table — pad rows are read from here by the panel and the reference
+  /// window. Falls back to `Bindings.fallback` (no keys, no gestures, the default pads) when no
+  /// store is injected, i.e. the bare `EngineViewModel()` the unit tests construct.
+  @Published public private(set) var bindings: Bindings
+  public var bindingsStore: BindingsStore?
+
+  /// Writes through the store so the assignment survives a relaunch (design §6.6). A save
+  /// failure is not fatal to the running instrument — the in-memory table still changes.
+  public func setPadAxis(pad index: Int, _ which: PadAxis, to axis: ControlAxis) {
+    guard bindings.pads.indices.contains(index) else { return }
+    var pads = bindings.pads
+    switch which {
+    case .x: pads[index].x = axis
+    case .y: pads[index].y = axis
+    }
+    if let bindingsStore {
+      do { try bindingsStore.setPads(pads) } catch { print("Bindings save failed: \(error)") }
+    }
+    bindings.pads = pads
+  }
+
   // MARK: - Init
 
   /// `engine`/`presetStore` default to `nil` so `EngineViewModel()` — the bare form the unit
   /// tests construct — builds a complete, pollable `ControlSurface` with no live `Engine`
   /// dependency at all (see the type doc above). `feedbax-dev/main.swift` is the only caller
   /// that passes real values.
-  public init(engine: Engine? = nil, presetStore: PresetStore? = nil) {
+  public init(engine: Engine? = nil, presetStore: PresetStore? = nil, bindingsStore: BindingsStore? = nil) {
     self.engine = engine
     self.presetStore = presetStore
+    self.bindingsStore = bindingsStore
+    self.bindings = bindingsStore?.bindings ?? Bindings.fallback
     if let engine {
       // Seed every mirror from the live engine's actual starting state, rather than this
       // class's own arbitrary defaults — `applyStartupDefaults` (called by `main.swift` before
       // this init) already put `router`/`sticker`/`waveforms` in their real cold-start state,
       // and the panel should show that, not zeroes or this class's own guessed rest values.
-      // (Review finding: this loop was previously missing `sliderValues` and the toggle
-      // mirrors entirely, so the 7 sliders rendered at zero while the engine was already
+      // (Review finding: this seeding was previously missing `axisValues` and the toggle
+      // mirrors entirely, so every axis widget rendered at zero while the engine was already
       // running the non-zero startup vector, and the toggle switches only "worked" by
       // coincidentally matching `ToggleEvent`'s own defaults — which drifts the moment either
       // side's default changes.)
-      sliderValues = Self.sliderMirror(from: engine.router.rawSlots)
+      axisValues = Self.axisMirror(from: engine.router)
       layerMode = engine.layerMode
       eraseValue = Double(engine.router.eraseControl)
       resolution = engine.resolution

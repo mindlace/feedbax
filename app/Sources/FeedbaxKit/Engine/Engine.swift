@@ -216,6 +216,14 @@ public final class Engine {
     // that draw call from needing its own gate check.
     audio.waveBumpRaw = bumpsEnabled.wave ? audio.waveBumpRaw : 0
 
+    // 2b. Image-layer placement: the router's ramped `imageMove` (spec §02 §4; design §4)
+    // lands on BOTH sources every frame. The original had one picsvid layer whose transform
+    // came from `imageMove` whether it showed a picture or a video — the same reason
+    // `handle(.layerEnabled:)` keeps both `.enabled` flags in lockstep. This is the layer's
+    // BASE placement; stage 3's kitty offset is additive on top and restored afterward.
+    sticker.transform = router.layerTransform
+    movie.transform = router.layerTransform
+
     // 3. Kitty offset: an ADDITIVE, non-persistent modulator contribution on top of the
     // sticker layer's manual transform (design §5's Modulator rule; spec §04 §1.3) — it
     // never becomes the new manual value, so it must not accumulate frame over frame. The

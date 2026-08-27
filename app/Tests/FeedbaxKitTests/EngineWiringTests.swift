@@ -223,6 +223,27 @@ final class EngineWiringTests: XCTestCase {
                          "the luma keyer's output must reach the composited frame")
   }
 
+  // MARK: - Layer placement wiring (design §4)
+
+  /// Both seed sources take the router's ramped layer transform every frame — the original had
+  /// ONE picsvid layer whose transform came from `imageMove` whether it showed a picture or a
+  /// video. The kitty offset (stage 3) is additive on top and restored, so after `step` the
+  /// sources read exactly the router's value.
+  func testBothSeedSourcesFollowTheRouterLayerTransform() throws {
+    let ctx = try MetalContext()
+    var captured: Engine?
+    _ = try render(frames: 1, context: ctx) { engine in
+      captured = engine
+      // Applied at −1 s, settled long before frame 0's step at t = 0.
+      engine.router.apply(ControlWrite(layer: [.x: 0.5, .rotate: 0.25]), at: -1)
+    }
+    let engine = try XCTUnwrap(captured)
+    XCTAssertEqual(engine.sticker.transform, engine.router.layerTransform)
+    XCTAssertEqual(engine.movie.transform, engine.router.layerTransform)
+    XCTAssertEqual(engine.sticker.transform.position.x, 0.85, accuracy: 1e-3, "0.5 × 1.7")
+    XCTAssertEqual(engine.sticker.transform.rotationZDegrees, 45, accuracy: 1e-2, "0.25 × 180°")
+  }
+
   // MARK: - Waveform + bump-gate wiring (replaces `waveforms-synthetic`)
 
   /// A fixed synthetic mixture of wave 1's and worldBump's own band centres (46.7 + 144.3 Hz,

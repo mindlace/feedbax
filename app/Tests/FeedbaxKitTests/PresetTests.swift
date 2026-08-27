@@ -32,26 +32,36 @@ final class PresetTests: XCTestCase {
     XCTAssertEqual(store.list(), ["saturday"])
     XCTAssertEqual(try store.load(name: "saturday"), preset)
   }
-  func testApplyRestoresSlotsRampedAndTransformsDirectly() throws {
+  /// Recall glides EVERYTHING now: the 9 slots through the slot ramps (as before) and the layer
+  /// placement through the router's layer channel (design §4) — never by poking
+  /// `layer.transform`, which `Engine.step` overwrites from `router.layerTransform` on the very
+  /// next frame anyway. Settings (z-order/enable) still restore directly.
+  func testApplyRecallsSlotsAndLayerPlacementThroughTheRouter() throws {
     final class FakeLayer: SeedSource {
       let id = "sticker"; var transform = LayerTransform(); var layer = LayerSettings()
       func tick(_ frame: FrameContext) -> MTLTexture? { nil }
     }
     let router = ControlRouter()
-    _ = router.tick(at: 0)                       // ramps at rest on slot value 0
+    _ = router.tick(at: 0)                       // ramps at rest
     let layer = FakeLayer()
     let preset = Preset(name: "p", slots: [1, 0, 0, 0, 0, 0, 0, 0, 0], eraseControl: 0.3,
                         toggles: PresetToggles(), layers: [
                           PresetLayer(id: "sticker", sourceSelection: .stickerIndex(0),
-                                      transform: LayerTransform(position: SIMD2(0.5, 0), scale: SIMD2(1, 1),
-                                                                rotationZDegrees: 0),
+                                      transform: LayerTransform(position: SIMD2(0.85, 0), scale: SIMD2(1, 1),
+                                                                rotationZDegrees: 90),
                                       settings: LayerSettings(zOrder: 2, enabled: true), filters: [])])
     PresetStore.apply(preset, router: router, layers: [layer], at: 1.0)
     XCTAssertEqual(router.rawSlots[0], 1)
-    XCTAssertEqual(layer.transform.position.x, 0.5, "transforms restore directly")
-    // Recall RAMPS (design §5 Presets — glide, not snap): 10 ms in, hue is mid-flight.
+    XCTAssertEqual(router.rawLayer, [0.5, 0, 0, 0.5], "inverse-mapped into the layer channel")
+    XCTAssertTrue(layer.layer.enabled, "settings restore directly")
+    XCTAssertEqual(layer.transform, LayerTransform(), "transform is NOT written directly — Engine.step does that")
+    // Recall RAMPS (design §5 Presets — glide, not snap): 10 ms in, both hue and x are mid-flight.
     let mid = router.tick(at: 1.010)
+    let midX = router.layerTransform.position.x
     let settled = router.tick(at: 1.2)
     XCTAssertNotEqual(mid.hueShift, settled.hueShift, accuracy: 1e-5)
+    XCTAssertNotEqual(midX, 0.85, accuracy: 1e-3)
+    XCTAssertEqual(router.layerTransform.position.x, 0.85, accuracy: 1e-3)
+    XCTAssertEqual(router.layerTransform.rotationZDegrees, 90, accuracy: 1e-2)
   }
 }

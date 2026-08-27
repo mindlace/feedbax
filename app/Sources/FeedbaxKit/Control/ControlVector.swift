@@ -33,13 +33,33 @@ public enum ToggleEvent: Equatable, Codable {
 /// §2) — so it gets its own field rather than overloading `slots`.
 public struct ControlWrite {
   public var slots: [ControlSlot: Float]
+  /// The image layer's raw axes (design §3.2) — the same partial-write contract as `slots`,
+  /// kept in its own dictionary so `ControlRouter`'s slot code keeps its shape and the 9-slot
+  /// vector stays exactly the original's `shadeCtl`.
+  public var layer: [LayerAxis: Float]
   public var toggles: [ToggleEvent]
   public var eraseStep: Float?
 
-  public init(slots: [ControlSlot: Float] = [:], toggles: [ToggleEvent] = [], eraseStep: Float? = nil) {
+  public init(slots: [ControlSlot: Float] = [:], layer: [LayerAxis: Float] = [:],
+              toggles: [ToggleEvent] = [], eraseStep: Float? = nil) {
     self.slots = slots
+    self.layer = layer
     self.toggles = toggles
     self.eraseStep = eraseStep
+  }
+
+  /// Surfaces think in `ControlAxis`; the router thinks in two vectors. This is the split,
+  /// done once here rather than in every surface.
+  public init(axes: [ControlAxis: Float], toggles: [ToggleEvent] = [], eraseStep: Float? = nil) {
+    var slots: [ControlSlot: Float] = [:]
+    var layer: [LayerAxis: Float] = [:]
+    for (axis, value) in axes {
+      switch axis {
+      case .slot(let slot): slots[slot] = value
+      case .layer(let layerAxis): layer[layerAxis] = value
+      }
+    }
+    self.init(slots: slots, layer: layer, toggles: toggles, eraseStep: eraseStep)
   }
 }
 
@@ -79,11 +99,16 @@ public struct ControlStateSnapshot {
   public var wave1Enabled: () -> Bool
   public var wave2Enabled: () -> Bool
   public var layerEnabled: () -> Bool
+  /// The router's current RAW value for any axis (design §5). A relative gesture nudges FROM
+  /// this at poll time rather than from a private accumulator — otherwise a slider or preset
+  /// that moved the axis is undone by the next trackpad nudge (spec §2, finding 1).
+  public var rawValue: (ControlAxis) -> Float
 
   public init(sInvert: @escaping () -> Bool, worldBumpEnabled: @escaping () -> Bool,
               waveBumpEnabled: @escaping () -> Bool, kittyBumpEnabled: @escaping () -> Bool,
               wave1Enabled: @escaping () -> Bool, wave2Enabled: @escaping () -> Bool,
-              layerEnabled: @escaping () -> Bool) {
+              layerEnabled: @escaping () -> Bool,
+              rawValue: @escaping (ControlAxis) -> Float = { _ in 0 }) {
     self.sInvert = sInvert
     self.worldBumpEnabled = worldBumpEnabled
     self.waveBumpEnabled = waveBumpEnabled
@@ -91,6 +116,7 @@ public struct ControlStateSnapshot {
     self.wave1Enabled = wave1Enabled
     self.wave2Enabled = wave2Enabled
     self.layerEnabled = layerEnabled
+    self.rawValue = rawValue
   }
 
   /// Looks up the live truth for whichever boolean-carrying case `template` is — its OWN
@@ -119,9 +145,36 @@ public struct ControlStateSnapshot {
   /// about the truth-driven flip (finding 4) needs a snapshot that can change between polls,
   /// e.g. closing over a `var` the test mutates itself to simulate the router having applied a
   /// previous write.
-  public static func constant(_ value: Bool) -> ControlStateSnapshot {
+  public static func constant(_ value: Bool,
+                              rawValue: @escaping (ControlAxis) -> Float = { _ in 0 }) -> ControlStateSnapshot {
     ControlStateSnapshot(sInvert: { value }, worldBumpEnabled: { value }, waveBumpEnabled: { value },
                          kittyBumpEnabled: { value }, wave1Enabled: { value }, wave2Enabled: { value },
-                         layerEnabled: { value })
+                         layerEnabled: { value }, rawValue: rawValue)
+  }
+}
+
+extension ToggleEvent {
+  /// Reference-window label (design §8.1). Exhaustive on purpose: a new toggle without a name
+  /// is a compile error, not a blank row.
+  public var displayName: String {
+    switch self {
+    case .sInvert: return "SInvert"
+    case .worldBumpEnabled: return "World bump"
+    case .waveBumpEnabled: return "Wave bump"
+    case .kittyBumpEnabled: return "Kitty bump"
+    case .wave1Enabled: return "Wave 1"
+    case .wave2Enabled: return "Wave 2"
+    case .layerEnabled: return "Layer enable"
+    case .fullscreen: return "Fullscreen"
+    case .stillCapture: return "Still capture"
+    }
+  }
+
+  /// `.fullscreen`/`.stillCapture` fire the same way every press; everything else alternates.
+  public var isOneShot: Bool {
+    switch self {
+    case .fullscreen, .stillCapture: return true
+    default: return false
+    }
   }
 }

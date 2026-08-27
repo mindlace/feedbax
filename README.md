@@ -46,6 +46,26 @@ The main shader parameters (accessible via the UI, Mira, or Leap Motion) are:
 
 The audio section (`p sound2`) draws waveform graphs into the GL context and generates audio-reactive "bumps" that modulate the visual parameters.
 
+### Controls (Swift port)
+
+The native macOS port lives in [`app/`](app/README.md) — that README covers building, running (`swift run --package-path app feedbax-dev`), and testing it.
+
+Press `?` (or Help › Feedbax Controls, ⌘/) inside the app for the live reference — it is generated from the bindings table, so it is always current. Summary:
+
+**Keys:** `i` SInvert · `w` world bump · `a` wave bump · `k` kitty bump · `p` layer enable · `1`/`2` wave 1/2 · `f`/Esc fullscreen · `s` still capture · `[`/`]` erase −/+.
+
+**Trackpad (over the Output window):** unmodified gestures drive the feedback field, **Option** drives the image layer, **Shift** drives colour.
+
+| Gesture | — | Option | Shift |
+|---|---|---|---|
+| Drag (1 finger) / Scroll (2) | Pan X / Pan Y | Image X / Image Y | Hue shift / Brightness (drag only) |
+| Pinch | Zoom | Image scale | Saturation |
+| Twist | Rotate | Image rotate | — |
+
+**Pads:** two XY pads in the Controls window, each assignable to any two axes (default: pad 1 = image X/Y, pad 2 = pan X/Y — the original's two Mira pads). Assignments persist in `~/Library/Application Support/Feedbax/Bindings.json`, which can also hold hand-edited `keys`/`trackpad` sections that override the bundled defaults (version 2). That file is an overlay, not a copy: only the sections it actually contains override the app's, so improvements to the bundled table keep reaching you.
+
+**Gamepad:** left stick pan, right stick hue/brightness, triggers zoom/rotate, d-pad erase and saturation, A/B/X/Y SInvert/layer/wave 1/wave 2, Menu fullscreen.
+
 ## Architecture
 
 The patch is structured around a Jitter GL rendering pipeline with a texture feedback loop:
