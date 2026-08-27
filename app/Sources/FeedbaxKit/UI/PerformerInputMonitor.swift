@@ -122,27 +122,32 @@ public final class PerformerInputMonitor {
     case .scrollWheel:
       guard isOutputWindowEvent(event), let height = eventViewHeight(event) else { return .passThrough }
       // `scrollingDeltaX/Y` are raw POINTS and one fast swipe can report 5–40 of them; fed
-      // straight into `accumulate`'s ±1 range that slams the pan accumulator to its clamp in a
-      // single event. Dividing by the output view's height turns "drag the full height of the
-      // output" into "drive the axis across its whole −1...1 range", and scales with the
-      // window automatically. `KeyboardTrackpadSurface` is deliberately AppKit-free and has no
-      // view geometry of its own, which is why this normalization lives here.
-      surface.scroll(dx: Float(event.scrollingDeltaX) / height,
-                     dy: Float(event.scrollingDeltaY) / height)
+      // straight into `nudge`'s ±1 range that slams the axis to its clamp in a single event.
+      // Dividing by the output view's height turns "drag the full height of the output" into
+      // "drive the axis across its whole −1...1 range", and scales with the window
+      // automatically. `KeyboardTrackpadSurface` is deliberately AppKit-free and has no view
+      // geometry of its own, which is why this normalization lives here.
+      surface.gesture(GestureEvent(gesture: .scroll,
+                                   dx: Float(event.scrollingDeltaX) / height,
+                                   dy: Float(event.scrollingDeltaY) / height))
       return .forward
 
     case .magnify:
       guard isOutputWindowEvent(event) else { return .passThrough }
       // `magnification` is already a small per-event ratio, not raw points — no normalization.
-      surface.magnify(Float(event.magnification))
+      surface.gesture(GestureEvent(gesture: .pinch, dx: Float(event.magnification)))
       return .forward
 
     case .leftMouseDragged:
-      // Option-held drag: x → hue, y → theta (`KeyboardTrackpadSurface.modifiedDrag`). Plain
-      // drags are intentionally not forwarded — the output view has no click-drag role in P1.
+      // Option-held drag: normalized the same way as scroll, and routed through the bindings
+      // table (`.drag`/`.option` → the image layer's X/Y in the v2 default table) rather than
+      // a hardcoded axis. Plain drags are intentionally not forwarded — the output view has no
+      // click-drag role in P1. Task 6 replaces this whole block with the plain-drag/Shift-drag
+      // rework this case doesn't yet cover.
       guard event.modifierFlags.contains(.option), isOutputWindowEvent(event),
             let height = eventViewHeight(event) else { return .passThrough }
-      surface.modifiedDrag(dx: Float(event.deltaX) / height, dy: Float(event.deltaY) / height)
+      surface.gesture(GestureEvent(gesture: .drag, modifiers: [.option],
+                                   dx: Float(event.deltaX) / height, dy: Float(event.deltaY) / height))
       return .forward
 
     default:

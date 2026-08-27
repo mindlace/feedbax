@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "keys": {
     "i": "sInvert",
     "w": "worldBumpEnabled",
@@ -11,11 +11,25 @@
     "1": "wave1Enabled",
     "2": "wave2Enabled"
   },
-  "trackpad": {
-    "panX": {"slot": "panX", "sensitivity": 1.0},
-    "panY": {"slot": "panY", "sensitivity": 1.0},
-    "zoom": {"slot": "zoom", "sensitivity": 1.0},
-    "hue": {"slot": "hue", "sensitivity": 1.0},
-    "theta": {"slot": "theta", "sensitivity": 1.0}
-  }
+  "trackpad": [
+    { "gesture": "drag",   "modifiers": [],         "x": {"axis": "panX",   "sensitivity": 1.0},
+                                                     "y": {"axis": "panY",   "sensitivity": 1.0} },
+    { "gesture": "drag",   "modifiers": ["option"], "x": {"axis": "layerX", "sensitivity": 1.0},
+                                                     "y": {"axis": "layerY", "sensitivity": 1.0} },
+    { "gesture": "drag",   "modifiers": ["shift"],  "x": {"axis": "hue",    "sensitivity": 1.0},
+                                                     "y": {"axis": "bias",   "sensitivity": 1.0} },
+    { "gesture": "scroll", "modifiers": [],         "x": {"axis": "panX",   "sensitivity": 1.0},
+                                                     "y": {"axis": "panY",   "sensitivity": 1.0} },
+    { "gesture": "scroll", "modifiers": ["option"], "x": {"axis": "layerX", "sensitivity": 1.0},
+                                                     "y": {"axis": "layerY", "sensitivity": 1.0} },
+    { "gesture": "pinch",  "modifiers": [],         "axis": {"axis": "zoom",        "sensitivity": 1.0} },
+    { "gesture": "pinch",  "modifiers": ["option"], "axis": {"axis": "layerScale",  "sensitivity": 1.0} },
+    { "gesture": "pinch",  "modifiers": ["shift"],  "axis": {"axis": "saturation",  "sensitivity": 1.0} },
+    { "gesture": "rotate", "modifiers": [],         "axis": {"axis": "theta",       "sensitivity": 1.0} },
+    { "gesture": "rotate", "modifiers": ["option"], "axis": {"axis": "layerRotate", "sensitivity": 1.0} }
+  ],
+  "pads": [
+    { "x": "layerX", "y": "layerY" },
+    { "x": "panX",   "y": "panY" }
+  ]
 }
