@@ -1,7 +1,7 @@
 # Controls: trackpad gestures, XY pads, and a controls reference — design
 
 **Date:** 2026-08-26
-**Status:** draft for review
+**Status:** implemented 2026-08-27 (plan: docs/superpowers/plans/2026-08-26-controls-gestures-and-help.md); pinch/twist directions pending the performer's run pass
 **Builds on:** `2026-08-23-feedbax-reimplementation-design.md` §5 (control surfaces),
 `2026-08-24-control-display-split-design.md` (windows, `PerformerInputMonitor`),
 spec §04 (control surfaces — the original's two Mira pads).
@@ -349,8 +349,14 @@ modifiers, then the action. Read-only; observes the store's bindings so pad rows
 ### 8.3 Opening it
 
 - **Menu:** `FeedbaxScenes` adds `.commands { CommandGroup(replacing: .help) { Button("Feedbax
-  Controls") … .keyboardShortcut("?", modifiers: .command) } }` — the first app-defined menu
-  item; ⌘? is the platform's Help shortcut.
+  Controls") … .keyboardShortcut("/", modifiers: .command) } }` — the first app-defined menu
+  item. **Amended in implementation (Task 11):** the shortcut is **⌘/**, not ⌘?, as this section
+  originally specified. ⌘? *is* ⌘⇧/, and macOS reserves that exact chord system-wide for the
+  Help menu's own search field — it silently strips any app menu item bound to it, no matter how
+  the shortcut is expressed (`.keyboardShortcut("?", modifiers: .command)` and
+  `.keyboardShortcut("/", modifiers: [.command, .shift])` both failed to fire). ⌘/ is the closest
+  surviving chord to the spec's ⌘? intent. The bare `?` key below is unaffected and still opens
+  the same window.
 - **`?` key:** handled in `PerformerInputMonitor` next to Escape — no text editor focused,
   modifier set ⊆ {Shift} (so `Shift-/` on US layouts and a bare `?` on layouts that have one) —
   and consumed. Why not a bare `?` key-equivalent on the menu item: unmodified menu key
@@ -425,6 +431,37 @@ Changed:
 - Image rotate is clamped ±180° like the field's rotate; the original's accumulator was unbounded.
 - Gesture directions (sign of each default `sensitivity`) are set by hand in the run pass.
 - Gesture-lock thresholds are first guesses.
+
+**Task 12 run-pass outcomes.** macOS has no public API that emits a synthetic trackpad
+magnify/rotate event, so pinch and twist cannot be driven from a script; everything else in
+§6.1's table *can* be driven — a real `NSEvent.leftMouseDragged` sequence, posted via
+`CGEventCreateMouseEvent` with the HID delta fields set explicitly (a plain `cliclick` drag
+moves the cursor but leaves `deltaX`/`deltaY` at 0, which this surface reads directly, so it
+never registers) — and was exercised end-to-end against a live `swift run --package-path app
+feedbax-dev`, reading the Controls window's numeric readouts from screenshots:
+
+- **Verified, correct as shipped (no change):** plain drag right → PAN X rises; Option-drag
+  right → IMAGE X rises (sticker moves right); Shift-drag right → HUE-SHIFT rises; Pad 1 drag →
+  IMAGE X/Y sliders follow the pointer absolutely, `+Y` = up (the pad's own mapping, independent
+  of trackpad sensitivity, was already correct).
+- **Verified, inverted — fixed by flipping `sensitivity` from `1.0` to `-1.0` on that row's `y`
+  axis in `DefaultBindings.json`:** plain drag up drove PAN Y *down* (`-1` on the `drag/[]` row's
+  `panY`); Option-drag up drove IMAGE Y *down* (`-1` on the `drag/[option]` row's `layerY`);
+  Shift-drag up drove BRIGHTNESS *down* (`-1` on the `drag/[shift]` row's `bias`). All three
+  X axes and all six scroll/pinch/rotate rows were left at `1.0` — untouched and unverified by
+  this pass, per scope. `BindingsTests.testBundledDefaultIsVersion2WithTheDesignTable` and
+  `KeyboardSurfaceTests.testModifiersSelectTheTargetAndSensitivityScales` were updated to expect
+  the new sign (the latter wasn't in Task 12's file list but hardcoded the old value for the same
+  row and would otherwise fail).
+- **Verified:** `?` opens Controls Reference with Output frontmost; Help › Feedbax Controls and
+  the literal ⌘/ chord both do the same (see the §8.3 amendment above); Pad 2's Y picker
+  persists across quit/relaunch to `~/Library/Application Support/Feedbax/Bindings.json` (set to
+  Zoom, confirmed after a cold relaunch, then set back to Pan Y before the final quit).
+- **Pending the performer's own run pass** (needs real trackpad hardware): pinch out → zoom in;
+  twist counter-clockwise → rotate counter-clockwise; Option-pinch → image grows; Option-twist →
+  image rotates; Shift-pinch out → SATURATION rises; and the dominant-gesture lock (twist while
+  pinching a little: rotate moves, ZOOM stays put). If any of these reads backwards, the fix is
+  the same per-row `sensitivity` flip in `DefaultBindings.json` used above — never in code.
 
 ## 13. Swift notes for the reader
 

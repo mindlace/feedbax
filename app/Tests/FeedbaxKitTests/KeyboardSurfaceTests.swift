@@ -103,7 +103,9 @@ final class KeyboardSurfaceTests: XCTestCase {
     XCTAssertEqual(w.layer[.scale]!, 0.2, accuracy: 1e-6, "Option-pinch → image scale")
     XCTAssertEqual(w.slots[.theta]!, 0.25, accuracy: 1e-6, "twist → rotate")
     XCTAssertEqual(w.slots[.hue]!, 0.1, accuracy: 1e-6, "Shift-drag x → hue")
-    XCTAssertEqual(w.slots[.bias]!, -0.2, accuracy: 1e-6, "Shift-drag y → brightness")
+    // Run pass (design §12, Task 12): dy=-0.2 (an upward drag) must RAISE brightness, so the
+    // bundled default's Shift-drag y sensitivity is -1 — the expected sign here flips to match.
+    XCTAssertEqual(w.slots[.bias]!, 0.2, accuracy: 1e-6, "Shift-drag y → brightness")
     XCTAssertNil(w.slots[.zoom], "plain pinch was not performed")
   }
 

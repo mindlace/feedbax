@@ -26,7 +26,8 @@ final class BindingsTests: XCTestCase {
                    .single(TrackpadAxis(axis: .layer(.scale), sensitivity: 1)))
     XCTAssertEqual(b.trackpadBinding(for: .drag, modifiers: [.shift])?.target,
                    .xy(x: TrackpadAxis(axis: .slot(.hue), sensitivity: 1),
-                       y: TrackpadAxis(axis: .slot(.bias), sensitivity: 1)))
+                       y: TrackpadAxis(axis: .slot(.bias), sensitivity: -1)),
+                   "run pass (design §12): Shift-drag up must raise BRIGHTNESS, so bias sensitivity is -1")
     XCTAssertEqual(b.trackpadBinding(for: .scroll, modifiers: [.option])?.target,
                    .xy(x: TrackpadAxis(axis: .layer(.x), sensitivity: 1),
                        y: TrackpadAxis(axis: .layer(.y), sensitivity: 1)))
