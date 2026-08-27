@@ -44,7 +44,10 @@ public final class KeyboardTrackpadSurface: ControlSurface {
   /// table's "key → ToggleEvent" shape without widening that contract past what Task 13 needs.
   private var pendingEraseStep: Float?
 
-  private static let eraseStepMagnitude: Float = 0.05
+  /// Internal rather than private so `ControlReference.fixedKeyRows` can spell the `[`/`]`
+  /// rows from the very constant those keys apply, instead of a literal that can drift from it
+  /// (design §8.1 — the reference IS the keys).
+  static let eraseStepMagnitude: Float = 0.05
 
   /// Arbitrates between simultaneously-delivered two-finger gestures (design §6.3, Task 5) —
   /// see `GestureLock`'s own doc comment for why this needs to exist at all.

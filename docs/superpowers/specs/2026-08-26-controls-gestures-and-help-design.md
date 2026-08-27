@@ -131,7 +131,11 @@ reason `layerEnabled` already keeps both `.enabled` flags in lockstep.
 recall, `PresetStore.apply` now seeds the router's layer channel from the preset's sticker
 layer transform via the inverse map (`LayerAxis.raw(fromMapped:)`) — ramped, the same glide the
 9 slots get — instead of poking `layer.transform` directly, which the engine would overwrite
-next frame. `capture` is unchanged (it reads the live transforms, which the router wrote).
+next frame. Recall therefore **clamps** a saved transform into the layer channel's raw domain
+(x ±1.7, y ±1, scale 0.01–2, rotation ±180°) where it previously restored the saved numbers
+verbatim; nothing that existed before this branch could write a value outside that domain, so
+no preset a performer already holds is changed by it. `capture` is unchanged (it reads the live
+transforms, which the router wrote).
 
 ## 5. Relative gestures resolve against the truth, not a private accumulator
 
@@ -259,6 +263,11 @@ an unbound gesture+modifier combination is never swallowed.
   ]
 }
 ```
+
+> **The listing above shows every `sensitivity` at `1.0`; the shipped `DefaultBindings.json`
+> does not.** Task 12's run pass flipped the three drag-Y rows (`drag/[]` → `panY`,
+> `drag/[option]` → `layerY`, `drag/[shift]` → `bias`) to `-1.0`. **§12 is authoritative for
+> signs**; this listing is here for the shape of the file.
 
 - `trackpad` is a list of `TrackpadBinding { gesture, modifiers, target }` where `target` is
   `.xy(TrackpadAxis, TrackpadAxis)` for drag/scroll and `.single(TrackpadAxis)` for
@@ -462,11 +471,21 @@ feedbax-dev`, reading the Controls window's numeric readouts from screenshots:
   the literal ⌘/ chord both do the same (see the §8.3 amendment above); Pad 2's Y picker
   persists across quit/relaunch to `~/Library/Application Support/Feedbax/Bindings.json` (set to
   Zoom, confirmed after a cold relaunch, then set back to Pan Y before the final quit).
-- **Pending the performer's own run pass** (needs real trackpad hardware): pinch out → zoom in;
-  twist counter-clockwise → rotate counter-clockwise; Option-pinch → image grows; Option-twist →
-  image rotates; Shift-pinch out → SATURATION rises; and the dominant-gesture lock (twist while
-  pinching a little: rotate moves, ZOOM stays put). If any of these reads backwards, the fix is
-  the same per-row `sensitivity` flip in `DefaultBindings.json` used above — never in code.
+- **Pending the performer's own run pass** (needs real trackpad hardware):
+  - pinch out → zoom in; twist counter-clockwise → rotate counter-clockwise; Option-pinch →
+    image grows; Option-twist → image rotates; Shift-pinch out → SATURATION rises; and the
+    dominant-gesture lock (twist while pinching a little: rotate moves, ZOOM stays put).
+  - **two-finger scroll X and Y, plain and with Option** (`scroll/[]` → Pan X/Y, `scroll/[option]`
+    → Image X/Y): scroll right → Pan X / Image X rises; scroll "up" → Pan Y / Image Y rises.
+    These are pending for a *different* reason than pinch and twist, which simply cannot be
+    synthesized: `scrollingDeltaY` already has the system **natural scrolling** preference baked
+    into its sign, so there is no single static sign that is correct for every machine, and the
+    drag-Y rows' verified `-1.0` says nothing about what scroll-Y should be — the two very
+    likely want *opposite* signs. It has to be felt on the performer's own machine, at that
+    machine's own setting.
+
+  If any of these reads backwards, the fix is the same per-row `sensitivity` flip in
+  `DefaultBindings.json` used above — never in code.
 
 ## 13. Swift notes for the reader
 

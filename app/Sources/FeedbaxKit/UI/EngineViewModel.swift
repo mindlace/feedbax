@@ -13,15 +13,17 @@ import simd
 /// ever calls methods on this object.
 ///
 /// Two kinds of state cross this boundary, matching the two kinds of thing the panel does:
-/// - **Slot writes and toggles** go through `poll`, queued and drained exactly once — see that
-///   method's own comment for why this differs from `KeyboardTrackpadSurface`'s "keep asserting
-///   while held" accumulators.
-/// - **Everything else the panel controls is not part of the 9-slot vector at all** — erase
+/// - **Axis writes and toggles** go through `poll`, queued and drained exactly once — see that
+///   method's own comment for why this differs from `KeyboardTrackpadSurface`, which resolves
+///   pending deltas against live truth every frame. "Axis", not "slot": since the layer channel
+///   landed (design §3–§4) a `ControlWrite` addresses `ControlAxis`, whose 11 live cases
+///   (`ControlAxis.live`) are the 7 driven shader slots plus the image layer's 4.
+/// - **Everything else the panel controls is not a `ControlAxis` at all** — erase
 ///   (a direct `ControlRouter.eraseControl` write, spec §01 §2's "never ramped, never a slot"),
 ///   layer mode, sticker selection, movie loading, resolution/rate, and presets. Those go
-///   straight to `Engine`/`PresetStore` because there is no `ToggleEvent`/`ControlSlot` for them
+///   straight to `Engine`/`PresetStore` because there is no `ToggleEvent`/`ControlAxis` for them
 ///   to ride — `ControlWrite` only carries what a *performer gesture* can assert mid-show; a
-///   file picker or a resolution change is a setup action, not a slot.
+///   file picker or a resolution change is a setup action, not an axis.
 ///
 /// `engine`/`presetStore` are optional, defaulted to `nil`, specifically so `EngineViewModel()`
 /// — the bare initializer the unit tests use — builds a fully testable `ControlSurface` with no
@@ -117,8 +119,10 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
 
   // MARK: - ControlSurface
 
-  /// Drains the queue built up since the last call — unlike `KeyboardTrackpadSurface`'s held
-  /// accumulators (which keep reasserting a slot's position every frame while it's nonzero),
+  /// Drains the queue built up since the last call. `KeyboardTrackpadSurface` no longer keeps
+  /// accumulators of its own (design §5): it holds *pending deltas* and resolves them against
+  /// the router's truth at poll time. This surface is one step simpler still, because it has
+  /// an absolute value to assert rather than a relative nudge —
   /// a slider's write is a one-shot assertion: the performer moved it to X, the router should
   /// glide there, and nothing needs re-asserting next frame just because a fader sits still
   /// (the brief's own test name: "asserted once then drained"). Returning `nil` once nothing is
@@ -208,7 +212,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     }
   }
 
-  // MARK: - Erase (spec §01 §2: outside the 9-slot vector, never ramped, never a `ControlWrite`
+  // MARK: - Erase (spec §01 §2: not a `ControlAxis` at all, never ramped, never a `ControlWrite`
   // field for this surface — a slider position is an absolute "here is where TRANSPARANCY sits
   // now," not `KeyboardTrackpadSurface`'s relative `[`/`]` nudge, so it writes `eraseControl`
   // directly rather than round-tripping through `ControlWrite.eraseStep`)
@@ -390,8 +394,8 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
       // class's own arbitrary defaults — `applyStartupDefaults` (called by `main.swift` before
       // this init) already put `router`/`sticker`/`waveforms` in their real cold-start state,
       // and the panel should show that, not zeroes or this class's own guessed rest values.
-      // (Review finding: this loop was previously missing `sliderValues` and the toggle
-      // mirrors entirely, so the 7 sliders rendered at zero while the engine was already
+      // (Review finding: this seeding was previously missing `axisValues` and the toggle
+      // mirrors entirely, so every axis widget rendered at zero while the engine was already
       // running the non-zero startup vector, and the toggle switches only "worked" by
       // coincidentally matching `ToggleEvent`'s own defaults — which drifts the moment either
       // side's default changes.)

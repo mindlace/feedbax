@@ -18,13 +18,41 @@ final class ControlReferenceTests: XCTestCase {
     let keyboard = section("Keyboard", in: ControlReference.build(from: bindings))
     let fixed = Array(keyboard.rows.prefix(ControlReference.fixedKeyRows.count))
     XCTAssertEqual(fixed, ControlReference.fixedKeyRows)
-    XCTAssertEqual(fixed.map(\.input), ["Esc", "[", "]", "?"])
+    XCTAssertEqual(fixed.map(\.input), ["Esc", "[", "]", "?", "⌘/"])
     let bound = keyboard.rows.dropFirst(fixed.count)
     XCTAssertEqual(bound.map(\.input), bindings.keys.keys.sorted(), "sorted by key, one row each")
     let iRow = bound.first { $0.input == "i" }!
     XCTAssertEqual(iRow.action, "SInvert"); XCTAssertEqual(iRow.kind, "toggle")
     let fRow = bound.first { $0.input == "f" }!
     XCTAssertEqual(fRow.kind, "one-shot")
+  }
+
+  /// The `[`/`]` step is `KeyboardTrackpadSurface.eraseStepMagnitude` formatted the same way
+  /// the gamepad's d-pad rows format theirs — not a literal that can drift from the constant
+  /// the keys actually apply (design §8.1).
+  func testEraseStepRowsAreDerivedFromTheSurfacesOwnConstant() {
+    let rows = Dictionary(uniqueKeysWithValues: ControlReference.fixedKeyRows.map { ($0.input, $0) })
+    XCTAssertEqual(rows["["]?.action, "Erase −0.05")
+    XCTAssertEqual(rows["]"]?.action, "Erase +0.05")
+    XCTAssertEqual(rows["["]?.kind, "step")
+    XCTAssertEqual(ControlReference.stepText(KeyboardTrackpadSurface.eraseStepMagnitude), "0.05",
+                   "%g, so 0.05 stays 0.05 and 0.1 doesn't become 0.100000")
+  }
+
+  /// The window has to say how to get back to itself — Help › Feedbax Controls' own shortcut
+  /// (⌘/, not ⌘?: macOS binds ⌘? to the Help menu's search field, Task 11's ruling).
+  func testTheReferenceNamesItsOwnMenuShortcut() {
+    let row = ControlReference.fixedKeyRows.first { $0.input == "⌘/" }
+    XCTAssertEqual(row?.action, "Show this window (Help › Feedbax Controls)")
+    XCTAssertEqual(row?.kind, "one-shot")
+  }
+
+  /// One action, one label: the Esc row used to say "Toggle fullscreen" while the gamepad's
+  /// Menu row derived "Fullscreen" from `ToggleEvent.displayName`.
+  func testEscUsesTheSameFullscreenLabelAsTheGamepadMenuRow() {
+    let esc = ControlReference.fixedKeyRows.first { $0.input == "Esc" }
+    XCTAssertEqual(esc?.action, ToggleEvent.fullscreen.displayName)
+    XCTAssertEqual(esc?.action, GamepadSurface.reference.first { $0.input == "Menu" }?.action)
   }
 
   func testTrackpadRowsFollowTheTableInOrderWithModifierSymbols() throws {

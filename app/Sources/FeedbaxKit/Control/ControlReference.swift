@@ -31,15 +31,28 @@ public struct ControlReference: Equatable {
 
   public var sections: [Section]
 
-  /// Keys handled OUTSIDE the bindings table — `PerformerInputMonitor` (Escape, `?`) and
-  /// `KeyboardTrackpadSurface` (`[`/`]`, hardcoded because `ToggleEvent` has no signed-step
-  /// case). Listed here by hand because that is where they live; keep in step with those two
-  /// files.
+  /// A step size as a reference row shows it: `0.05` → "0.05", `0.1` → "0.1" — `%g` drops the
+  /// trailing zeros `"\(Float)"` would print. Shared by `fixedKeyRows` below and
+  /// `GamepadSurface.reference`, so the keyboard's step and the d-pad's are formatted by one
+  /// rule and each is read from the constant its own surface applies (design §8.1).
+  static func stepText(_ magnitude: Float) -> String { String(format: "%g", magnitude) }
+
+  /// Keys handled OUTSIDE the bindings table — `PerformerInputMonitor` (Escape, `?`),
+  /// `KeyboardTrackpadSurface` (`[`/`]`, hardcoded there because `ToggleEvent` has no
+  /// signed-step case), and the Help menu item's own ⌘/ equivalent (`FeedbaxScenes`). Listed
+  /// here by hand because that is where they live; keep in step with those files. The step
+  /// magnitude and the fullscreen label are interpolated from their real sources rather than
+  /// retyped, so neither can drift from what the key actually does.
   public static let fixedKeyRows: [Row] = [
-    Row(input: "Esc", modifiers: "", action: "Toggle fullscreen", kind: "one-shot"),
-    Row(input: "[", modifiers: "", action: "Erase −0.05", kind: "step"),
-    Row(input: "]", modifiers: "", action: "Erase +0.05", kind: "step"),
+    Row(input: "Esc", modifiers: "", action: ToggleEvent.fullscreen.displayName, kind: "one-shot"),
+    Row(input: "[", modifiers: "",
+        action: "Erase −\(stepText(KeyboardTrackpadSurface.eraseStepMagnitude))", kind: "step"),
+    Row(input: "]", modifiers: "",
+        action: "Erase +\(stepText(KeyboardTrackpadSurface.eraseStepMagnitude))", kind: "step"),
     Row(input: "?", modifiers: "", action: "Show this window", kind: "one-shot"),
+    // The window has to say how to get back to itself. ⌘/ and not ⌘?: macOS binds ⌘?
+    // (= ⌘⇧/) to the Help menu's search field and strips it from any item that claims it.
+    Row(input: "⌘/", modifiers: "", action: "Show this window (Help › Feedbax Controls)", kind: "one-shot"),
   ]
 
   public static func build(from bindings: Bindings,
