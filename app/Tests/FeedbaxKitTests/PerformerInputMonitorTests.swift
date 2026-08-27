@@ -203,9 +203,30 @@ final class PerformerInputMonitorTests: XCTestCase {
   func testGesturePhaseMapsNSEventPhase() {
     XCTAssertEqual(PerformerInputMonitor.gesturePhase(.began), .began)
     XCTAssertEqual(PerformerInputMonitor.gesturePhase(.changed), .changed)
-    XCTAssertEqual(PerformerInputMonitor.gesturePhase([]), .changed, "momentum/stationary events count as changes")
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([]), .changed, "stationary events count as changes")
     XCTAssertEqual(PerformerInputMonitor.gesturePhase(.ended), .ended)
     XCTAssertEqual(PerformerInputMonitor.gesturePhase(.cancelled), .cancelled)
+  }
+
+  /// A momentum scroll — the flick that keeps coasting after the fingers lift — reports
+  /// `phase == []` and carries its whole lifecycle in `momentumPhase` instead. Reading only
+  /// `phase` made every coasting event a `.changed`, which re-claimed `GestureLock` for
+  /// `.scroll` with no `.ended` ever following: the lock stayed claimed and silently discarded
+  /// every later pinch/twist (design §6.3, final-review finding 1).
+  func testMomentumPhaseCarriesTheLifecycleWhenPhaseIsEmpty() {
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([], momentum: .began), .changed,
+                   "the fingers are already up — the real scroll began the sequence")
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([], momentum: .changed), .changed)
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([], momentum: .ended), .ended,
+                   "coasting stops: the only release the lock will ever see")
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([], momentum: .cancelled), .cancelled)
+  }
+
+  /// `NSEvent.Phase` is an `OptionSet`, so more than one bit can be set at once. Terminal bits
+  /// win over `.began` so a release is never lost (Task 6's deferred minor, now covered).
+  func testGesturePhaseCombinedBitsPreferTheTerminalPhase() {
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([.began, .ended]), .ended)
+    XCTAssertEqual(PerformerInputMonitor.gesturePhase([.ended, .cancelled]), .cancelled)
   }
 
   func testRotationIsNormalisedSoHalfATurnSpansTheRange() {

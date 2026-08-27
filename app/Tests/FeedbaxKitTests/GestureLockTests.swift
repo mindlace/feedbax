@@ -10,6 +10,30 @@ final class GestureLockTests: XCTestCase {
   private func pinch(_ m: Float, phase: GesturePhase = .changed) -> GestureEvent {
     GestureEvent(gesture: .pinch, phase: phase, dx: m)
   }
+  private func scroll(_ dy: Float, phase: GesturePhase = .changed) -> GestureEvent {
+    GestureEvent(gesture: .scroll, phase: phase, dx: 0, dy: dy)
+  }
+
+  /// The exact sequence a real two-finger flick produces (final-review finding 1): the scroll
+  /// proper ends, and THEN AppKit keeps delivering momentum events — which used to arrive as
+  /// `.changed` forever because `PerformerInputMonitor.gesturePhase` read only `event.phase`
+  /// (empty during momentum) and never `event.momentumPhase`. Those re-claimed the lock for
+  /// `.scroll` with no terminal event to follow, so every pinch and twist after a flick was
+  /// discarded. With the momentum phase mapped, the coast's own `.ended` releases the lock.
+  func testMomentumScrollReleasesTheLockSoALaterPinchIsAdmitted() {
+    var lock = GestureLock()
+    XCTAssertTrue(lock.admit(scroll(0.1)), "the real scroll claims the sequence")
+    _ = lock.admit(scroll(0, phase: .ended))
+    XCTAssertEqual(lock.state, .idle, "fingers lifted")
+    // The coast: each momentum event carries travel and re-claims `.scroll`.
+    XCTAssertFalse(lock.admit(scroll(0.01)))
+    XCTAssertTrue(lock.admit(scroll(0.01)), "0.02 cumulative crosses the scroll threshold")
+    XCTAssertTrue(lock.admit(scroll(0.01)))
+    XCTAssertEqual(lock.state, .claimed(.scroll))
+    _ = lock.admit(scroll(0, phase: .ended))            // momentumPhase == .ended
+    XCTAssertEqual(lock.state, .idle, "the coast's own end releases the lock")
+    XCTAssertTrue(lock.admit(pinch(0.1)), "the next pinch is admitted, not swallowed")
+  }
 
   func testSubThresholdMovementIsNotAdmitted() {
     var lock = GestureLock()

@@ -82,11 +82,26 @@ public final class PerformerInputMonitor {
     return modifiers
   }
 
-  /// `NSEvent.Phase` → `GesturePhase`. Momentum scroll events and stationary events carry an
-  /// empty phase; they are ordinary changes to the surface.
-  public static func gesturePhase(_ phase: NSEvent.Phase) -> GesturePhase {
-    if phase.contains(.cancelled) { return .cancelled }
-    if phase.contains(.ended) { return .ended }
+  /// `NSEvent.Phase` → `GesturePhase`, reading BOTH of the phase fields a scroll carries.
+  ///
+  /// A flick on a trackpad produces two runs of events: the fingers-down scroll (lifecycle in
+  /// `event.phase`, `momentumPhase` empty) and then the coast that keeps arriving after
+  /// lift-off (`phase` EMPTY, lifecycle in `event.momentumPhase`). Reading `phase` alone made
+  /// every coasting event a `.changed`: each one accumulated travel and re-claimed
+  /// `GestureLock` for `.scroll`, and since no `.ended` ever came, the lock stayed claimed and
+  /// silently discarded every pinch and twist that followed — until the performer happened to
+  /// finish another real scroll (design §6.3, final-review finding 1).
+  ///
+  /// Priority: `.cancelled` over `.ended` over `.began`, and a terminal bit in EITHER field
+  /// wins — a release must never be lost, since it is what frees the lock. `NSEvent.Phase` is
+  /// an `OptionSet`, so several bits really can be set at once. Momentum `.began` is
+  /// deliberately mapped to `.changed`, not `.began`: the fingers are already up, the sequence
+  /// was claimed by the real scroll (or will be re-claimed by the coast's own travel), and
+  /// nothing downstream wants a second "began" mid-flick.
+  public static func gesturePhase(_ phase: NSEvent.Phase,
+                                  momentum: NSEvent.Phase = []) -> GesturePhase {
+    if phase.contains(.cancelled) || momentum.contains(.cancelled) { return .cancelled }
+    if phase.contains(.ended) || momentum.contains(.ended) { return .ended }
     if phase.contains(.began) { return .began }
     return .changed
   }
@@ -192,7 +207,10 @@ public final class PerformerInputMonitor {
       // across its whole −1...1 range" and scales with the window. The surface is AppKit-free
       // and has no geometry of its own, which is why the normalisation lives here.
       guard let height = eventViewHeight(event) else { return .passThrough }
-      return forward(.scroll, event: event, phase: Self.gesturePhase(event.phase),
+      // `momentumPhase` as well as `phase`: scroll is the one gesture that keeps delivering
+      // events after the fingers lift, and only `momentumPhase` says when that coast ends.
+      return forward(.scroll, event: event,
+                     phase: Self.gesturePhase(event.phase, momentum: event.momentumPhase),
                      delta: SIMD2(Float(event.scrollingDeltaX) / height, Float(event.scrollingDeltaY) / height))
 
     case .magnify:
