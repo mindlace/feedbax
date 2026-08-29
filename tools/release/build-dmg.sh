@@ -113,8 +113,60 @@ export_app() {
     || die "bundle says version '$got', expected '$VERSION'"
 }
 
+dmg_path="dist/Feedbax-$VERSION.dmg"
+staging_dir="app/build/dmg-staging"
+
+make_dmg() {
+  step "Assembling $dmg_path"
+  rm -rf "$staging_dir"
+  mkdir -p "$staging_dir" dist
+  cp -R "$export_dir/Feedbax.app" "$staging_dir/Feedbax.app"
+  ln -s /Applications "$staging_dir/Applications"
+
+  rm -f "$dmg_path"
+  hdiutil create \
+    -volname "Feedbax $VERSION" \
+    -srcfolder "$staging_dir" \
+    -fs HFS+ \
+    -format UDZO \
+    -ov \
+    "$dmg_path"
+
+  step "Signing $dmg_path"
+  codesign --sign "$SIGNING_IDENTITY" --timestamp --force "$dmg_path"
+}
+
+notarize() {
+  if [[ -n "$SKIP_NOTARIZE" ]]; then
+    step "Skipping notarization (SKIP_NOTARIZE set)"
+    return
+  fi
+
+  step "Notarizing $dmg_path (this takes a few minutes)"
+  # --wait blocks until Apple accepts or rejects; a rejection is a nonzero exit.
+  xcrun notarytool submit "$dmg_path" "${notary_args[@]}" --wait
+
+  step "Stapling the ticket"
+  xcrun stapler staple "$dmg_path"
+}
+
+verify_dmg() {
+  step "Verifying $dmg_path"
+  [[ -f "$dmg_path" ]] || die "no DMG at $dmg_path"
+
+  spctl -a -vvv -t install "$dmg_path" 2>&1 | tee /dev/stderr \
+    | grep -q 'source=Notarized Developer ID' \
+    || die "Gatekeeper does not see $dmg_path as notarized"
+
+  xcrun stapler validate "$dmg_path" \
+    || die "notarization ticket is not stapled to $dmg_path"
+}
+
 generate_project
 archive
 export_app
+make_dmg
+notarize
+[[ -n "$SKIP_NOTARIZE" ]] || verify_dmg
 
-step "Done: $export_dir/Feedbax.app"
+step "Done: $dmg_path"
