@@ -22,6 +22,7 @@
 - Every shell script starts `#!/usr/bin/env bash` + `set -euo pipefail`.
 - Commit messages use Conventional Commits — release-please derives the changelog from them.
 - Secrets/variables consumed by CI, created per `docs/dev/releasing.md` Part 1: variable `DEVELOPMENT_TEAM`; secrets `DEVELOPER_ID_CERT_P12`, `DEVELOPER_ID_CERT_PASSWORD`, `NOTARY_KEY_P8`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`.
+- **The DMG is arm64-only.** `build-dmg.sh` passes `ARCHS=arm64` to the archive: the engine uses SIMD `Float16`, which does not exist on x86_64, so the universal-binary default fails to compile. Discovered during execution; see the spec's "Correction: the DMG is Apple silicon only".
 - Releases are **not** gated on tests: the engine tests build real Metal pipelines and are not headless-CI friendly, and `GoldenFrameTests` fails by design against the empty `GoldenReferences/`.
 
 ---
@@ -805,6 +806,13 @@ A Finder-launched app has a working directory of `/`, so the repository's
 `AppBootstrap.swift` applies: stickers are read from `~/Pictures/Feedbax/stickers/`
 and stills are written to `~/Pictures/Feedbax/`. Say so in the release notes —
 it is the one behavioural difference between the DMG and `swift run`.
+
+### Apple silicon only
+
+The DMG contains an arm64-only binary. The engine uses SIMD `Float16`, which
+Swift does not provide on x86_64, so the app cannot be built for Intel Macs at
+all — `build-dmg.sh` pins `ARCHS=arm64` rather than letting the archive attempt
+a universal binary and fail. Say so in the release notes.
 ````
 
 - [ ] **Step 2: Link it from the app README**

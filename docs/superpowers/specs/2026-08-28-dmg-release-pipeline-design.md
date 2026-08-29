@@ -274,6 +274,26 @@ tests:
 ## Out of scope
 
 App icon and custom DMG window art; Sparkle or any auto-update mechanism; a
-Homebrew cask; a CI test job; universal-binary questions (a Release archive
-already covers arm64 and x86_64 by default); Max patch artifacts — `patches/`
-and `assets/` stay out of the DMG entirely.
+Homebrew cask; a CI test job; Max patch artifacts — `patches/` and `assets/`
+stay out of the DMG entirely.
+
+## Correction: the DMG is Apple silicon only
+
+This section originally listed universal binaries as a non-question, on the
+assumption that a Release archive covers arm64 and x86_64 by default. It does —
+and the x86_64 slice does not compile:
+
+```
+MetalContext.swift:60:33: error: type 'Float16' does not conform to protocol 'SIMDScalar'
+MetalContext.swift:93:45: error: type 'Float16' does not conform to protocol 'SIMDScalar'
+```
+
+Swift has no SIMD `Float16` on x86_64, so the engine has never been buildable
+for Intel. It went unnoticed because `swift build` and `swift run` compile only
+the host architecture, and nothing had ever asked for a fat binary. Adding
+`ARCHS=arm64` to the archive gives `** ARCHIVE SUCCEEDED **`.
+
+`build-dmg.sh` therefore pins `ARCHS=arm64` and the DMG requires Apple silicon.
+This documents an existing limit rather than imposing a new one — an Intel Mac
+cannot run Feedbax today either. Lifting it means refactoring `MetalContext`'s
+Float16 SIMD usage, which is engine work, not packaging work.
