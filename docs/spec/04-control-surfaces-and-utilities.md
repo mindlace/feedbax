@@ -104,7 +104,7 @@ Emitted from `[obj-8] pack 0. ×10` → `[obj-44] s imageMove`, **no `zl.change`
 
 | slot | field | source | notes |
 |---|---|---|---|
-| 0 | enable | **toggle `toggle[2]`** `[obj-1]`, label "pic enable" | picture/video layer on/off; default explicit `loadmess 0` (`[obj-82]`) — off at load |
+| 0 | enable | **toggle `toggle[2]`** `[obj-1]`, label "pic enable" | picture/video layer on/off; default explicit `loadmess 1` (`[obj-82]`) — **on at load** (was `loadmess 0` in Sean's build; changed 2026-08-29 so a loaded sticker is visible without an iPad — this slot is rebroadcast at 60 Hz, so with it off nothing in picsvid can ever enable the layer) |
 | 1 | x | `[obj-80] mIniCtlSmooth` ← `[obj-67] scale 0.1 0.9 -1.7 1.7` ← **left `mira.mt.centroid` outlet 0** | **Correction:** the original table cited outlet **1** here; the connection list shows `[obj-128 mira.mt.centroid]:0 -> [obj-67 ...]:0` — it's outlet **0**. Given that, the original "axis-swapped: touch Y drives the x slot" claim does not hold up either (it was derived from the wrong outlet index) — outlet 0 → the `x` slot reads as the *natural*, non-swapped mapping if `mira.mt.centroid`'s outlet 0 is X (not independently verifiable from this listing — Mira object, no public doc consulted) **[?]** |
 | 2 | y | **two sources**, last-write-wins: (a) `[obj-79] mIniCtlSmooth` ← `[obj-64] scale 0. 1. 1 -1.` ← **left `mira.mt.centroid` outlet 1** (see correction above — was mis-cited as outlet 0); (b) `[obj-53] mIniCtlSmooth` ← `[obj-59] scale 0. 1024 -1. 1.` ← `abs()` of `r kittybumpsignal` → `slide` envelope — see kittybump below | no confirmed axis swap; audio kick-bump also lands here |
 | 3 | (unused, literal 0) | — | — |
@@ -121,7 +121,7 @@ Emitted from `[obj-8] pack 0. ×10` → `[obj-44] s imageMove`, **no `zl.change`
 
 | control | varname | bus | default | effect |
 |---|---|---|---|---|
-| pic enable | toggle[2] `obj-1` | `imageMove` slot 0 | explicit `loadmess 0` (`[obj-82]`) — off | show/hide the picture/video layer |
+| pic enable | toggle[2] `obj-1` | `imageMove` slot 0 | explicit `loadmess 1` (`[obj-82]`) — on (Sean's build: `loadmess 0`) | show/hide the picture/video layer |
 | Video? | toggle[12] `obj-107` | `livevid` | unsaved (no `loadmess` found, true Max default 0/off) | picsvid: show video vs. still image |
 | Fill/Line | toggle[4] `obj-93` | `waveLineFilll` | unsaved | sound2 waveform draw mode |
 | kittieBump™ | toggle[5] `obj-162` | `kittybump` | unsaved | enable audio kick→zoom-bump feedback loop |
@@ -299,7 +299,7 @@ Legend: **Perf** = continuous, played live during a show; **Setup** = a one-time
 | iPad tilt (gravity) | `mira.motion`, gated by "Motion control" | shadeCtl[6] theta (shared w/ rotate slider) | accel-derived | **ON by default** (`loadmess 1`, `obj-148` — corrected, see §1.3) | no | tilt-driven rotation | Perf |
 | CONTRAST | slider `slider[3]` | shadeCtl[7] NC | −1..1 | 0 | no | shader "NC" param | Perf |
 | SATURATION | slider `slider[9]` | shadeCtl[8] sat | 0..1 | 0 | no | saturation | Perf |
-| pic enable | toggle `toggle[2]` | imageMove[0] | 0/1 | off | — | show/hide picture layer | Setup |
+| pic enable | toggle `toggle[2]` | imageMove[0] | 0/1 | on (Sean: off) | — | show/hide picture layer | Setup |
 | Left-pad touch centroid | mira.mt.centroid `obj-128` | imageMove[1]/[2] x/y | 0..1→−1..1/1..−1 | n/a | mIniCtlSmooth | position picture/video | Perf |
 | pinch (left pad, 2-finger) | `p xypinch` outlet 0 | imageMove[4]/[5] zx/zy | accumulated, exp curve | 0.33 baseline | mIniCtlSmooth | zoom picture/video | Perf |
 | pic -size | slider `slider[12]` | imageMove[4]/[5] (added to kittybump) | −1..1 | 0.747 (persisted) | mIniCtlSmooth | base picture zoom | Perf/Setup hybrid |
@@ -355,7 +355,7 @@ on ctrlbang():
     // patch, the pinch-delta-driven accumulator is additionally a dead branch that never reaches
     // this output at all (see §1.2.1) — reimplement the *intent* (persistent pinch-to-zoom,
     // continuous two-finger rotate with NO gesture-end reset) rather than the literal wiring.
-    imageMove.enable = picEnableToggle   // default OFF (explicit loadmess 0)
+    imageMove.enable = picEnableToggle   // default ON since 2026-08-29 (explicit loadmess 1; Sean's build: loadmess 0)
     imageMove.x, .y  = lastWrite(leftPadCentroid.swappedXY(), kittybumpEnvelope on .y)
     zoom = lastWrite(xypinchZoomAccumulator, uiPicSizeSlider + kittybumpEnvelope)
     imageMove.zx = imageMove.zy = zoom
@@ -421,7 +421,7 @@ Corrections made in this pass (traced against the raw `.maxpat` JSON and the con
 - **Reset-button ×5 targets were wrong.** Re-traced each button→message→slider chain: the real targets are BRIGHTNESS→1.0 (`obj-30`), HUE-SHIFT→1.1 (`obj-17`), SATURATION→0.5 (`obj-50`), TRANSPARANCY→1.0 (`obj-83`), ZOOM→1.0 (`obj-27`) — not "rotate/pic-size/theta-ish/zoom/transparency" driving sliders 74/75/56/27/83 as originally stated. Only the TRANSPARANCY and ZOOM targets were coincidentally right.
 - **"Motion control" toggle (`obj-146`) defaults ON**, via `loadmess 1` (`obj-148`) — the original text called it "unsaved"/off. Device-tilt modulation of `shadeCtl` scale/theta is active from patch load, not opt-in.
 - **`soundwave_enable`/toggle[6] defaults ON**, via `loadmess 1` (`obj-92`) — also mislabeled "unsaved" in the original. `soundwave_enable1`/toggle[13] is genuinely unsaved/off, confirmed no `loadmess`.
-- **`pic enable`/toggle[2] and "Wave Lighting"/toggle[10]** do have explicit `loadmess 0` wiring (both off) — cosmetically the original's "unsaved" claim reached the right value but the wrong provenance; corrected for completeness.
+- **`pic enable`/toggle[2] and "Wave Lighting"/toggle[10]** do have explicit `loadmess` wiring (Sean's build: both `loadmess 0`, off) — cosmetically the original's "unsaved" claim reached the right value but the wrong provenance; corrected for completeness. `pic enable` is `loadmess 1` (on) since 2026-08-29 — see §imageMove.
 - **`shaderfx.obj-7 ||`** (the automatic gate-open condition for `shadeCtlLeap`) was mislabeled "right-hand presence" — it's wired to the exact same two `frame_info` hand-presence flags as `leap2HandsActive`, i.e. it's an *either-hand* OR, not right-hand-specific.
 - **shadeCtlLeap hue/bias/scalebright chain was missing a step** (`obj-114 zl slice 3`) between `obj-113 zl slice 1` and the gate feeding `vexpr`; added, and clarified that `vexpr` broadcasts its expression element-wise across the incoming 3-element list rather than operating on a single scalar.
 - **shadeCtlLeap slot 7 (NC) is dead, not a "duplicate tap."** `obj-124`'s `scale` emits a scalar; feeding a scalar into a 3-outlet `unpack` only fires the first outlet (standard Max behavior) — so `obj-75`'s outlet 1 (feeding NC) never fires. NC stays at the pack's literal default (0.) whenever Leap is the active source.
