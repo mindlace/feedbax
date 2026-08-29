@@ -19,3 +19,5 @@ __pycache__/
 # Swift package build products
 app/.build/
 app/Feedbax.xcodeproj/
+app/build/
+dist/
