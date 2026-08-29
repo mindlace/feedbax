@@ -34,12 +34,25 @@ jobs:
       # No GitHub App token here, unlike planafoot: nothing listens on
       # `release: published`, so GITHUB_TOKEN's suppressed events cost us
       # nothing. The DMG job below is a `needs:` job in this same workflow.
+      #
+      # `skip-github-pull-request` splits release-please's two jobs apart. In
+      # one invocation it would create the release *and then* compute the next
+      # release PR — but our releases are born as drafts (see the `dmg` job),
+      # and release-please cannot see its own draft. It reports "Expected 1
+      # releases, only found 0", falls back to walking the entire commit
+      # history, and re-encounters the one-time `Release-As:` pin still sitting
+      # in that history. The result is a bogus release PR proposing a
+      # *downgrade* to the pinned version, opened on every single release.
+      #
+      # So: create the release here, and let `next-release-pr` open the PR
+      # after the DMG job has published it.
       - uses: googleapis/release-please-action@v5.0.0
         id: rp
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
 
       # The `dmg` job below is *skipped*, not failed, when the gate resolves
       # false — so an output rename in release-please would otherwise publish a
@@ -246,3 +259,26 @@ jobs:
       - name: Delete the signing keychain
         if: always()
         run: security delete-keychain "$SIGNING_KEYCHAIN" || true
+
+  # The other half of the split described in the `release-please` job: open or
+  # update the release PR for the *next* version, once any release this run
+  # created has been published and is therefore visible to release-please.
+  next-release-pr:
+    needs: [release-please, dmg]
+    # `dmg` is skipped on an ordinary push — that is the common case, and the
+    # release PR still has to be opened — so this cannot be a plain `needs:`
+    # gate. It must run when `dmg` succeeded *or* was skipped, and must not run
+    # when `dmg` failed: a failed DMG leaves an unpublished draft release, which
+    # is exactly the invisible-release state that produces a bogus downgrade PR.
+    if: >-
+      always() &&
+      needs.release-please.result == 'success' &&
+      (needs.dmg.result == 'success' || needs.dmg.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
