@@ -8960,7 +8960,7 @@
 						224.0,
 						22.0
 					],
-					"text": "jit.movie @output_texture 1 @drawto foo"
+					"text": "jit.movie @output_texture 0"
 				}
 			},
 			{

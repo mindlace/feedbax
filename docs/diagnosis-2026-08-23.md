@@ -234,3 +234,32 @@ performer-driven spiral; optional removal of the vestigial `fst`/`dst`/`switch 2
   `folder ./Cycling '74/max-help: not a folder` (a vestigial folder-watcher in picsVid with a
   hard-coded bogus path — also in Sean's file); `live.slider doesn't understand "signal"` (sound2's
   outlet 0 is a signal; cosmetic); `Gen working in runtime mode`.
+
+## Addendum 2026-08-29 — sticker (picsVid) path on Max 9
+
+Symptom: with a PNG in `input/transparent-background/` the menu populated and `jit.movie` reported
+`read <file> 1`, but nothing ever appeared. Two independent causes, both proven live on Max 9.1.5
+with a `js` probe inside `feedbax.picsvid` (attribute dumps + outlet taps + screenshots):
+
+* **H. `jit.gl.layer fb` is never enabled.** It is instantiated `@enable 0`; its only enable
+  sources are webUI's `imageMove` slot 0 (the "pic enable" toggle, `loadmess 0`) and the camera
+  toggle. `imageMove` is rebroadcast every `ctrlbang` (60 Hz), so a manual `enable 1` sent to the
+  layer is overwritten within a frame — measured: `enable` read back `0` one second after sending
+  `1`; it only stuck after the `imageMove` gate was closed. Fix: `feedbax.webui` `[obj-82]`
+  `loadmess 0` → `loadmess 1`. With nothing loaded the enabled layer draws nothing (verified with
+  the folder empty), so the default is safe.
+* **I. `jit.movie @output_texture 1` emits an empty texture.** After the fix for H the layer had
+  the movie's texture bound (`texture u…`) yet drew nothing; a `jit.gl.videoplane foo` bound to
+  the same texture drew solid black, for Pluto and for a trivial 8-bit RGBA test PNG alike
+  (`framecount 0`, `duration 0` under `engine avf`). Isolated with fresh objects: `read` + bang in
+  the same tick (what `t b s` does) → the object emits nothing on that or any later bang until
+  the next `read`; a fresh object with `read` then a bang 2 s later → texture filled; obj-49
+  itself (load-time read) → black even after re-read + delayed bang. Matrix output works in every
+  one of those conditions, including on obj-49: `output_texture 0`, `read`, bang → correct
+  `jit_matrix`, and `jit.gl.layer` accepts it directly. Fix: `[obj-49]` →
+  `jit.movie @output_texture 0` (the `@drawto foo` from the earlier fix is moot in matrix mode).
+  `jit.grab @drawto foo` [obj-113] (camera) was left alone — same class of risk, not tested.
+
+Verified: fresh load with `Pluto-transparent.png` present → the disc lands in the `fb` node and
+recirculates (it blows out to white within a second — that is open item 2, trail-fade parity,
+not the sticker path); fresh load with the folder empty → no rectangle (Console not inspected in these runs).
