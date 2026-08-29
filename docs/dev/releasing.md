@@ -194,4 +194,95 @@ the `.p8`. It belongs in an encrypted backup and nowhere near the repository.
 
 ## Part 2 — Cutting a release
 
-*To be written alongside the pipeline implementation.*
+### One-time step: pinning the first release
+
+The repository has no git tags yet. release-please decides the next version by
+looking at the latest tag; with none, it reports "No latest release", walks the
+entire commit history, and computes the next bump *from the seeded manifest
+value* in `.release-please-manifest.json` (currently `0.123.0`). A dry run
+against this repo confirmed it: with nothing done, the first automated release
+would propose `0.124.0` and tag `v0.124.0` — and `0.123.0`, chosen deliberately
+to read as pre-1.0 and as a port of Max patch 1.2.3, would never become a tag,
+a release, or a DMG.
+
+So before the normal path below can run for the first time, pin it explicitly.
+Land one commit on `main` with a `Release-As: 0.123.0` footer — release-please's
+documented mechanism for setting an exact next version regardless of what commit
+history would otherwise compute. This is the same mechanism as "Forcing a
+specific version" below; it just needs to happen once, first, because there is
+no prior tag for the normal path to build on. Do not repeat this after the
+first release ships — subsequent versions come from Conventional Commits alone.
+
+### The normal path
+
+1. Land work on `main` with Conventional Commits — `feat:` bumps the minor
+   (pre-1.0), `fix:` the patch, and anything with `!` or a
+   `BREAKING CHANGE:` footer also bumps the minor while below 1.0.
+2. release-please opens or updates a release PR titled
+   `chore(main): release <version>`, carrying the `version.txt` bump and the
+   generated `CHANGELOG.md` entry. Edit the changelog in that PR if the
+   generated wording needs help.
+3. Merge it. That tags `v<version>`, publishes a GitHub Release, and — in the
+   same workflow run — builds, signs, notarizes, and attaches
+   `Feedbax-<version>.dmg`.
+
+Releases are not gated on tests. Run them yourself before merging a release PR:
+
+```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  swift test --package-path app --skip GoldenFrameTests
+```
+
+`GoldenFrameTests` is skipped by standing convention — `GoldenReferences/` is
+empty, so it fails by design.
+
+### Forcing a specific version
+
+Add a `Release-As: 1.0.0` footer to a commit on `main`.
+
+### Building a DMG without releasing
+
+Locally:
+
+```sh
+DEVELOPMENT_TEAM=<team id> tools/release/build-dmg.sh
+```
+
+Add `SKIP_NOTARIZE=1` to stop after signing — much faster, and useful for local
+testing, but the result is deliberately not a releasable artifact: it is named
+`dist/Feedbax-<version>-unnotarized.dmg` (not the plain `Feedbax-<version>.dmg`
+name), its volume label is suffixed `(UNNOTARIZED)`, and Gatekeeper will refuse
+it on any other Mac.
+
+In CI: Actions → release-please → *Run workflow*, with **force_dmg** checked.
+This runs the full sign-and-notarize pipeline as a smoke test (never
+`SKIP_NOTARIZE`) but does not create a release; the resulting
+`dist/Feedbax-<version>.dmg` is uploaded as a workflow run artifact named
+`Feedbax-dmg` instead of being attached anywhere.
+
+### When notarization fails
+
+`xcrun notarytool submit --wait` exits nonzero. `build-dmg.sh` catches this
+itself: it parses the submission ID out of the failed submission's output and
+runs `xcrun notarytool log <id>` automatically, printing Apple's log inline
+before the script exits — no manual log fetch is needed.
+
+The usual causes are a missing hardened runtime, an unsigned nested binary, or a
+signature without a secure timestamp — all three are set by `build-dmg.sh`, so a
+failure here usually means the certificate or its chain is wrong. Re-check
+`security find-identity -v -p codesigning`.
+
+### Where a user's files go
+
+A Finder-launched app has a working directory of `/`, so the repository's
+`input/transparent-background/` never resolves and the fallback in
+`AppBootstrap.swift` applies: stickers are read from `~/Pictures/Feedbax/stickers/`
+and stills are written to `~/Pictures/Feedbax/`. Say so in the release notes —
+it is the one behavioural difference between the DMG and `swift run`.
+
+### Apple silicon only
+
+The DMG contains an arm64-only binary. The engine uses SIMD `Float16`, which
+Swift does not provide on x86_64, so the app cannot be built for Intel Macs at
+all — `build-dmg.sh` pins `ARCHS=arm64` rather than letting the archive attempt
+a universal binary and fail. Say so in the release notes.
