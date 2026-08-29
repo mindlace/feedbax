@@ -107,13 +107,26 @@ and never a value a human has to maintain.
 
 ### Unit 2 — version plumbing
 
-Three edits make the version real instead of decorative:
+Two edits make the version real instead of decorative:
 
-- `app/project.yml` gains a `settings:` block declaring `MARKETING_VERSION` and
-  `CURRENT_PROJECT_VERSION` (it currently has no `settings:` block at all).
-- `app/App/Info.plist` changes `CFBundleShortVersionString` `1.0` →
-  `$(MARKETING_VERSION)` and `CFBundleVersion` `1` → `$(CURRENT_PROJECT_VERSION)`.
+- `app/project.yml` gains a `settings.base` block declaring `MARKETING_VERSION`
+  and `CURRENT_PROJECT_VERSION` (it has no `settings:` block at all today), and
+  its `info.properties` block gains `CFBundleShortVersionString:
+  "$(MARKETING_VERSION)"` and `CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"`.
 - `version.txt` becomes release-please's managed file, reseeded at `0.123.0`.
+
+**`app/App/Info.plist` is not edited by hand.** Despite being checked in, it is
+*generated output*: XcodeGen's `info:` key writes the plist at `info.path` on
+every `xcodegen generate`, and its defaults are exactly the `1.0` / `1` values
+sitting there now. Verified empirically — setting
+`CFBundleShortVersionString` to `9.9` by hand and regenerating reverts it to
+`1.0`. Version keys therefore have to enter through `project.yml`, and the
+regenerated plist carries the literal `$(MARKETING_VERSION)` reference that
+Xcode expands during "Process Info.plist".
+
+Whether to keep the generated plist checked in at all is a judgement call left
+as-is: it is committed today, and the plan keeps it committed (regenerated, so
+the `$(…)` references land in git) rather than expanding the diff.
 
 `version.txt` is thus the single source of truth, release-please owns writing
 it, and `build-dmg.sh` reads it. Nothing else in the repo hardcodes a version.
