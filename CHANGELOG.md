@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.2](https://github.com/mindlace/feedbax/compare/v0.123.1...v0.123.2) (2026-08-29)
+
+
+### Bug Fixes
+
+* **release:** split release-please so drafts cannot trigger a downgrade PR ([52dcc68](https://github.com/mindlace/feedbax/commit/52dcc687a54a7b1f5651e8839c94cb5e48ce308e))
+
 ## [0.123.1](https://github.com/mindlace/feedbax/compare/v0.123.0...v0.123.1) (2026-08-29)
 
 
