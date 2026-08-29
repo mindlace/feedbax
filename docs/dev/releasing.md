@@ -139,26 +139,47 @@ git commit --allow-empty \
 Push it to `main` and wait for the workflow. Expect a `chore(main): release
 0.123.0` PR; merging it tags `v0.123.0` and attaches the DMG.
 
-**`Release-As` alone is not enough, and the release PR will not tell you so.**
-This was tried and it half-works in a way built to mislead. Asking for a version
-*equal to* the value already in `.release-please-manifest.json` opens a
-correctly-numbered release PR — and then merging it produces no tag and no
-release. release-please reports `releases_created: false`, the `dmg` job is
-skipped, and the whole run is green. The merged release PR keeps its
-`autorelease: pending` label instead of moving to `autorelease: tagged`.
-
-The tell is in the generated changelog heading: a compare link reading
-`compare/v0.123.0...v0.123.0` means release-please sees no version change and
-will not tag. **A release PR appearing at the right number is not evidence the
-pin worked — only a tag is.**
-
-So make the requested version a genuine bump from the start: set
-`.release-please-manifest.json` to `0.122.0` in the same commit that carries the
-`Release-As: 0.123.0` footer. Leave `version.txt` at `0.123.0`; the release PR
-overwrites it either way.
-
 Do not repeat any of this after the first release ships — subsequent versions
 come from Conventional Commits alone.
+
+### When a release PR merges and nothing is released
+
+Seen three times before it was understood, so it is worth recognizing fast. The
+symptom: the release PR merges, the workflow is green, and there is no tag, no
+GitHub Release, and no DMG. `releases_created` is `false`, so the `dmg` job is
+*skipped* rather than failed. The merged PR keeps its `autorelease: pending`
+label instead of moving to `autorelease: tagged`.
+
+**The job outputs will not tell you why. The action's own log will.** Open the
+*Run googleapis/release-please-action* step and read it — the reason is a `⚠`
+line there, and nothing surfaces it anywhere else:
+
+```
+⚠ PR component: undefined does not match configured component: feedbax
+```
+
+That was the cause here. A `package-name` in `release-please-config.json` sets
+the *component*, and release-please then expects to parse that component back
+out of the release PR's own title on merge. Its generated title is
+`chore: release main`, which carries no component, so the check can never pass
+and it silently declines to build the release. Dropping `package-name` — the
+root package of a single-package manifest does not need one — makes the
+configured component `undefined` too, and the two match.
+
+Two traps worth knowing while diagnosing this:
+
+- **A stale `autorelease: pending` label wedges everything.** release-please
+  treats a merged-but-pending release PR as outstanding work and will not open
+  a new release PR while one exists — so a second attempt does nothing at all,
+  `prs_created: false` included. Clear the label from the old merged PR before
+  expecting any further progress.
+- **A changelog compare link reading `compare/vX.Y.Z...vX.Y.Z` is a red
+  herring.** It looks like release-please seeing no version change, and it is
+  not why the release is missing. Chasing it costs a manifest reseed and two
+  extra PRs. Read the action log first.
+
+**A release PR appearing at the right number is not evidence anything worked —
+only a tag is.**
 
 ### The normal path
 
