@@ -139,13 +139,23 @@ git commit --allow-empty \
 Push it to `main` and wait for the workflow. Expect a `chore(main): release
 0.123.0` PR; merging it tags `v0.123.0` and attaches the DMG.
 
-**If no release PR appears.** This path is untested against a repo with no
-tags, and `Release-As` asks for a version *equal to* the value already in
-`.release-please-manifest.json` — release-please may treat that as "nothing to
-do" and stay silent. The fallback is to make the requested version a genuine
-bump: set `.release-please-manifest.json` to `0.122.0`, commit that, and land
-the `Release-As: 0.123.0` commit again. Leave `version.txt` at `0.123.0`; the
-release PR overwrites it.
+**`Release-As` alone is not enough, and the release PR will not tell you so.**
+This was tried and it half-works in a way built to mislead. Asking for a version
+*equal to* the value already in `.release-please-manifest.json` opens a
+correctly-numbered release PR — and then merging it produces no tag and no
+release. release-please reports `releases_created: false`, the `dmg` job is
+skipped, and the whole run is green. The merged release PR keeps its
+`autorelease: pending` label instead of moving to `autorelease: tagged`.
+
+The tell is in the generated changelog heading: a compare link reading
+`compare/v0.123.0...v0.123.0` means release-please sees no version change and
+will not tag. **A release PR appearing at the right number is not evidence the
+pin worked — only a tag is.**
+
+So make the requested version a genuine bump from the start: set
+`.release-please-manifest.json` to `0.122.0` in the same commit that carries the
+`Release-As: 0.123.0` footer. Leave `version.txt` at `0.123.0`; the release PR
+overwrites it either way.
 
 Do not repeat any of this after the first release ships — subsequent versions
 come from Conventional Commits alone.
