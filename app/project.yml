@@ -7,5 +7,17 @@ targets:
     platform: macOS
     sources: [App]
     dependencies: [{ package: FeedbaxKit, product: FeedbaxKit }]
-    info: { path: App/Info.plist, properties: { NSMicrophoneUsageDescription: "Feedbax listens to the room to draw waveforms and bass bumps." } }
+    settings:
+      base:
+        # Placeholders. tools/release/build-dmg.sh overrides both on the
+        # xcodebuild command line from version.txt and the build number, so a
+        # release bundle never carries these values.
+        MARKETING_VERSION: "0.0.0"
+        CURRENT_PROJECT_VERSION: "0"
+    info:
+      path: App/Info.plist
+      properties:
+        NSMicrophoneUsageDescription: "Feedbax listens to the room to draw waveforms and bass bumps."
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
     entitlements: { path: App/Feedbax.entitlements, properties: { com.apple.security.device.audio-input: true } }
