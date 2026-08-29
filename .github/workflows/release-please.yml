@@ -224,6 +224,25 @@ jobs:
           version="${TAG#v}"
           gh release upload "$TAG" "dist/Feedbax-${version}.dmg" --clobber
 
+      # This repository has immutable releases enabled: once a release is
+      # published its asset list is frozen, and uploading returns
+      # "HTTP 422: Cannot upload assets to an immutable release". That is a
+      # property worth keeping for signed software — it is what stops a
+      # notarized DMG being swapped after the fact — so release-please creates
+      # the release as a draft (`"draft": true` in release-please-config.json)
+      # and it becomes public only here, after the DMG is attached.
+      #
+      # Publishing is also what creates the git tag: a draft release holds a
+      # tag *name*, not a ref.
+      - name: Publish the release
+        if: needs.release-please.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --draft=false --latest
+
       - name: Delete the signing keychain
         if: always()
         run: security delete-keychain "$SIGNING_KEYCHAIN" || true

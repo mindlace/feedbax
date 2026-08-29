@@ -181,6 +181,32 @@ Two traps worth knowing while diagnosing this:
 **A release PR appearing at the right number is not evidence anything worked —
 only a tag is.**
 
+### Draft first, publish last
+
+This repository keeps **immutable releases** switched on. That is the right
+setting for signed software — it is what stops a notarized DMG being quietly
+swapped for something else after the fact — but it means a published release's
+asset list is frozen. Uploading to one fails with:
+
+```
+HTTP 422: Cannot upload assets to an immutable release.
+```
+
+So the order is inverted: release-please creates the release as a **draft**
+(`"draft": true` in `release-please-config.json`), the `dmg` job attaches the
+DMG to that draft, and the last step of the job publishes it with
+`gh release edit "$TAG" --draft=false --latest`.
+
+Two consequences worth knowing:
+
+- **A draft release has no git tag.** It carries a tag *name*; the ref is
+  created at publish. So a tag appearing is proof the whole pipeline ran, not
+  just release-please.
+- **A failed DMG build leaves an unpublished draft, on purpose.** That is the
+  good failure mode: no half-finished public release promising a download that
+  does not exist. Fix the cause, re-run the failed jobs, and the same draft
+  gets its asset and goes public.
+
 ### The normal path
 
 1. Land work on `main` with Conventional Commits — `feat:` bumps the minor
