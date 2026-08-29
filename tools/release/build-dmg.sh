@@ -113,7 +113,16 @@ export_app() {
     || die "bundle says version '$got', expected '$VERSION'"
 }
 
-dmg_path="dist/Feedbax-$VERSION.dmg"
+# An unnotarized SKIP_NOTARIZE build must never look like a releasable
+# artifact. It gets a distinct filename so a human browsing dist/ or a CI
+# upload glob targeting "Feedbax-$VERSION.dmg" can't mistake one for the
+# other; the notarized name stays exactly "Feedbax-$VERSION.dmg" because
+# Task 5's upload step depends on it unchanged.
+if [[ -n "$SKIP_NOTARIZE" ]]; then
+  dmg_path="dist/Feedbax-$VERSION-unnotarized.dmg"
+else
+  dmg_path="dist/Feedbax-$VERSION.dmg"
+fi
 staging_dir="app/build/dmg-staging"
 
 make_dmg() {
@@ -123,9 +132,12 @@ make_dmg() {
   cp -R "$export_dir/Feedbax.app" "$staging_dir/Feedbax.app"
   ln -s /Applications "$staging_dir/Applications"
 
+  local volname="Feedbax $VERSION"
+  [[ -n "$SKIP_NOTARIZE" ]] && volname="Feedbax $VERSION (UNNOTARIZED)"
+
   rm -f "$dmg_path"
   hdiutil create \
-    -volname "Feedbax $VERSION" \
+    -volname "$volname" \
     -srcfolder "$staging_dir" \
     -fs HFS+ \
     -format UDZO \
@@ -138,13 +150,37 @@ make_dmg() {
 
 notarize() {
   if [[ -n "$SKIP_NOTARIZE" ]]; then
-    step "Skipping notarization (SKIP_NOTARIZE set)"
+    step "SKIP_NOTARIZE set — $dmg_path is an unnotarized smoke-test build, NOT for release"
     return
   fi
 
   step "Notarizing $dmg_path (this takes a few minutes)"
-  # --wait blocks until Apple accepts or rejects; a rejection is a nonzero exit.
-  xcrun notarytool submit "$dmg_path" "${notary_args[@]}" --wait
+  # --wait blocks until Apple accepts or rejects; a rejection is a nonzero
+  # exit. Capture output (instead of letting it stream straight to the
+  # terminal) so a rejection's submission ID can be pulled back out for the
+  # log fetch below; it's echoed back afterwards either way, so nothing is
+  # lost from the log.
+  local submit_output submit_status=0
+  submit_output="$(xcrun notarytool submit "$dmg_path" "${notary_args[@]}" --wait 2>&1)" \
+    || submit_status=$?
+  echo "$submit_output"
+
+  if [[ "$submit_status" -ne 0 ]]; then
+    local submission_id
+    submission_id="$(printf '%s\n' "$submit_output" \
+      | grep -m1 -E '^\s*id:' | awk '{print $2}')" || true
+
+    if [[ -n "$submission_id" ]]; then
+      step "Notarization failed — fetching Apple's log for $submission_id"
+      # Never let a failure here (network blip, expired credentials) mask
+      # the real failure above or turn this branch into a success.
+      xcrun notarytool log "$submission_id" "${notary_args[@]}" || true
+    else
+      step "Notarization failed and no submission ID could be parsed from its output"
+    fi
+
+    die "notarization rejected for $dmg_path — see log above"
+  fi
 
   step "Stapling the ticket"
   xcrun stapler staple "$dmg_path"
