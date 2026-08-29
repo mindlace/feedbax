@@ -22,8 +22,14 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      release_created: ${{ steps.rp.outputs.release_created }}
-      tag_name: ${{ steps.rp.outputs.tag_name }}
+      # release-please-action is running in manifest mode, where the outputs it
+      # documents are the *plural* `releases_created` plus per-path outputs
+      # (`.--tag_name` for the root package). The unprefixed singular names
+      # exist only because the root package `.` is hoisted. Read both spellings
+      # so a change to that hoisting cannot silently turn the `dmg` job's `if:`
+      # false — a skipped job is a green run with no DMG attached.
+      release_created: ${{ steps.rp.outputs.release_created || steps.rp.outputs.releases_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name || steps.rp.outputs['.--tag_name'] }}
     steps:
       # No GitHub App token here, unlike planafoot: nothing listens on
       # `release: published`, so GITHUB_TOKEN's suppressed events cost us
@@ -35,12 +41,44 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      # The `dmg` job below is *skipped*, not failed, when the gate resolves
+      # false — so an output rename in release-please would otherwise publish a
+      # release with no DMG on a green run. This step turns that class of
+      # change into a red build here, where it is visible.
+      - name: Assert the release outputs resolved
+        env:
+          OUTPUTS: ${{ toJSON(steps.rp.outputs) }}
+          CREATED: ${{ steps.rp.outputs.release_created || steps.rp.outputs.releases_created }}
+          TAG: ${{ steps.rp.outputs.tag_name || steps.rp.outputs['.--tag_name'] }}
+        run: |
+          set -euo pipefail
+          echo "release-please outputs:"
+          echo "$OUTPUTS"
+
+          if [[ "$CREATED" == "true" && -z "$TAG" ]]; then
+            echo "::error::release-please created a release but no tag name resolved from either spelling. Update the job outputs in .github/workflows/release-please.yml."
+            exit 1
+          fi
+
+          # Match a tag_name *key* (`"tag_name":` or `".--tag_name":`), not the
+          # word anywhere in a value — nested JSON in the `prs` output arrives
+          # escaped, so this cannot fire on a release PR's body.
+          if [[ "$CREATED" != "true" ]] \
+            && grep -qE '"[^"]*tag_name"[[:space:]]*:' <<<"$OUTPUTS"; then
+            echo "::error::release-please emitted a tag_name but no created flag resolved from either spelling. Update the job outputs in .github/workflows/release-please.yml."
+            exit 1
+          fi
+
   dmg:
     needs: release-please
     if: >-
       needs.release-please.outputs.release_created == 'true' ||
       inputs.force_dmg
     runs-on: macos-15
+    # Notarization waits on Apple, so this has to be generous — but not the
+    # 6-hour default: a `codesign` that ends up blocked on a keychain prompt
+    # no one can answer would otherwise hold a macOS runner all afternoon.
+    timeout-minutes: 60
     env:
       DEVELOPMENT_TEAM: ${{ vars.DEVELOPMENT_TEAM }}
       NOTARY_PROFILE: feedbax-notary
@@ -50,21 +88,40 @@ jobs:
           # build-dmg.sh derives BUILD_NUMBER from `git rev-list --count HEAD`.
           fetch-depth: 0
 
+      - name: Assert the release tag resolved
+        # Belt to the release-please job's braces: never notarize and upload
+        # against an empty tag.
+        if: needs.release-please.outputs.release_created == 'true'
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$TAG" ]]; then
+            echo "::error::a release was created but no tag name reached this job"
+            exit 1
+          fi
+          echo "releasing $TAG"
+
       - name: Select Xcode
-        run: echo "DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer" >> "$GITHUB_ENV"
+        # Pinned, not /Applications/Xcode.app: that symlink follows whatever
+        # the runner image currently defaults to, so an image bump could change
+        # the compiler under a release with no commit in this repo. 16.4 is the
+        # macos-15 image's current default, so this pins today's behaviour
+        # rather than changing it. When the image drops this version the build
+        # fails here, loudly, instead of drifting.
+        run: |
+          set -euo pipefail
+          xcode="/Applications/Xcode_16.4.app"
+          [[ -d "$xcode" ]] || {
+            echo "::error::$xcode is not on this runner image — pick a version from the macos-15 image manifest and update this step"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          }
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          DEVELOPER_DIR="$xcode/Contents/Developer" xcodebuild -version
 
       - name: Install xcodegen
         run: brew install xcodegen
-
-      - name: Determine version
-        # Used only to name the artifact we collect below. build-dmg.sh
-        # derives its own VERSION from version.txt the same way; this just
-        # gives the workflow the same value without parsing build-dmg.sh's
-        # output. On a real release this equals the version release-please
-        # just bumped and committed to main; on a force_dmg dry run there is
-        # no tag to derive it from, so version.txt (whatever is currently on
-        # the checked-out ref) is the only thing to name it after.
-        run: echo "VERSION=$(cat version.txt)" >> "$GITHUB_ENV"
 
       - name: Import signing certificate
         env:
@@ -128,6 +185,27 @@ jobs:
       - name: Build the DMG
         run: tools/release/build-dmg.sh
 
+      - name: Keep the built DMG as a run artifact
+        # Positioned immediately after the build and marked always() so the DMG
+        # survives a failure of anything below it. Notarization is irreversible
+        # and takes minutes; without this, a failed verification or a failed
+        # release upload would discard the runner — and re-running all jobs
+        # re-runs release-please, which now finds nothing releasable and skips
+        # this job, leaving the published release permanently DMG-less. This
+        # only preserves the artifact; it never masks a failure, because the
+        # failing step above it still fails the job.
+        #
+        # Covers the force_dmg dry run too, which is why there is no separate
+        # dry-run upload step: two upload-artifact steps sharing one artifact
+        # name is an error in v4.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Feedbax-dmg
+          path: dist/*.dmg
+          if-no-files-found: ignore
+          retention-days: 30
+
       - name: Upload the DMG to the release
         # Exact filename, not a glob: build-dmg.sh only ever writes the
         # unnotarized-marker filename when SKIP_NOTARIZE is set, which this
@@ -145,21 +223,6 @@ jobs:
           set -euo pipefail
           version="${TAG#v}"
           gh release upload "$TAG" "dist/Feedbax-${version}.dmg" --clobber
-
-      - name: Keep the DMG on dry runs
-        # Also exact, not a glob, and named from version.txt rather than a
-        # tag (workflow_dispatch has no release tag to derive one from).
-        # This job never sets SKIP_NOTARIZE, so a dry run still produces and
-        # collects the real notarized dist/Feedbax-<version>.dmg — the point
-        # of force_dmg per the workflow's own description is to exercise the
-        # full sign-and-notarize pipeline as a smoke test, not to produce the
-        # deliberately-unnotarized SKIP_NOTARIZE artifact, which has no
-        # reason to ever reach this workflow.
-        if: needs.release-please.outputs.release_created != 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Feedbax-dmg
-          path: dist/Feedbax-${{ env.VERSION }}.dmg
 
       - name: Delete the signing keychain
         if: always()

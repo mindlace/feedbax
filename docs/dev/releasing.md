@@ -99,6 +99,16 @@ Install it locally so you can build and sign on this Mac:
 ```sh
 security import developer_id.p12 -k ~/Library/Keychains/login.keychain-db \
   -T /usr/bin/codesign -T /usr/bin/security
+
+# Grant the imported key to Apple's tools without a prompt. Without this, the
+# first non-interactive `build-dmg.sh` run blocks on a GUI "codesign wants to
+# sign using key … in your keychain" dialog. The CI workflow does exactly this
+# to its throwaway keychain. Substitute your *login keychain* password (which
+# is your macOS account password), not the .p12 export password.
+security set-key-partition-list -S apple-tool:,apple: \
+  -k '<login keychain password>' \
+  ~/Library/Keychains/login.keychain-db >/dev/null
+
 security find-identity -v -p codesigning
 ```
 
@@ -164,6 +174,12 @@ sudo xcodebuild -license accept
 `build-dmg.sh` sets `DEVELOPER_DIR` itself, so this is only needed for ad-hoc
 `xcodebuild` and `swift test` invocations.
 
+In CI the workflow pins an explicit `/Applications/Xcode_<version>.app` rather
+than following the runner image's `Xcode.app` symlink, so a runner-image bump
+cannot change the compiler under a release. When GitHub drops that version from
+the `macos-15` image the *Select Xcode* step fails with the list of what is
+installed; pick one from that list and update the step.
+
 ### 1.7 — Verify
 
 ```sh
@@ -206,12 +222,35 @@ to read as pre-1.0 and as a port of Max patch 1.2.3, would never become a tag,
 a release, or a DMG.
 
 So before the normal path below can run for the first time, pin it explicitly.
-Land one commit on `main` with a `Release-As: 0.123.0` footer — release-please's
-documented mechanism for setting an exact next version regardless of what commit
-history would otherwise compute. This is the same mechanism as "Forcing a
-specific version" below; it just needs to happen once, first, because there is
-no prior tag for the normal path to build on. Do not repeat this after the
-first release ships — subsequent versions come from Conventional Commits alone.
+Land one commit on `main` carrying a `Release-As: 0.123.0` footer —
+release-please's documented mechanism for setting an exact next version
+regardless of what commit history would otherwise compute. Two details matter:
+
+- The **subject line must itself be a Conventional Commit**. release-please
+  parses the subject first; a non-conforming subject can make it skip the
+  commit entirely, footer and all.
+- The footer must be its own trailer line, separated from the body by a blank
+  line.
+
+```sh
+git commit --allow-empty \
+  -m 'chore: pin the first release to 0.123.0' \
+  -m 'Release-As: 0.123.0'
+```
+
+Push it to `main` and wait for the workflow. Expect a `chore(main): release
+0.123.0` PR; merging it tags `v0.123.0` and attaches the DMG.
+
+**If no release PR appears.** This path is untested against a repo with no
+tags, and `Release-As` asks for a version *equal to* the value already in
+`.release-please-manifest.json` — release-please may treat that as "nothing to
+do" and stay silent. The fallback is to make the requested version a genuine
+bump: set `.release-please-manifest.json` to `0.122.0`, commit that, and land
+the `Release-As: 0.123.0` commit again. Leave `version.txt` at `0.123.0`; the
+release PR overwrites it.
+
+Do not repeat any of this after the first release ships — subsequent versions
+come from Conventional Commits alone.
 
 ### The normal path
 
@@ -256,21 +295,84 @@ it on any other Mac.
 
 In CI: Actions → release-please → *Run workflow*, with **force_dmg** checked.
 This runs the full sign-and-notarize pipeline as a smoke test (never
-`SKIP_NOTARIZE`) but does not create a release; the resulting
-`dist/Feedbax-<version>.dmg` is uploaded as a workflow run artifact named
-`Feedbax-dmg` instead of being attached anywhere.
+`SKIP_NOTARIZE`), and the resulting `dist/Feedbax-<version>.dmg` is uploaded as
+a workflow run artifact named `Feedbax-dmg`.
+
+Note that the `release-please` job runs on `workflow_dispatch` too, so a dry run
+is not inert: it will open or update the release PR exactly as a push to `main`
+would. It will not normally *create* a release — but it would if a release PR
+had already been merged without its tagging run completing. If a release PR is
+open and unmerged, a dry run is safe; if one was just merged, let the push-
+triggered run finish first.
+
+The DMG is attached to a release only when a release was created in that same
+run, so on an ordinary dry run the artifact is the only place it lands.
+
+### Two notarization submissions, not one
+
+`build-dmg.sh` submits twice, and a release therefore waits on Apple twice:
+
+1. `Feedbax.app`, zipped, is notarized and the ticket is **stapled to the app**.
+2. The DMG is then assembled from that stapled app, signed, notarized, and the
+   ticket stapled to the DMG.
+
+The app has to be stapled separately because stapling a DMG puts the ticket in
+the DMG, not in the app inside it — so a user who drags `Feedbax.app` to
+`/Applications` and first launches it offline would otherwise see "Apple cannot
+check it for malicious software". And the DMG cannot ride on the app's
+submission: a ticket is issued per code-directory hash, and assembling and
+signing the DMG necessarily produces a hash Apple has not seen, so `stapler`
+would fail with error 65. Each artifact needs its own ticket.
 
 ### When notarization fails
 
 `xcrun notarytool submit --wait` exits nonzero. `build-dmg.sh` catches this
 itself: it parses the submission ID out of the failed submission's output and
 runs `xcrun notarytool log <id>` automatically, printing Apple's log inline
-before the script exits — no manual log fetch is needed.
+before the script exits — no manual log fetch is needed. The output names which
+artifact was rejected, the app zip or the DMG.
 
 The usual causes are a missing hardened runtime, an unsigned nested binary, or a
 signature without a secure timestamp — all three are set by `build-dmg.sh`, so a
 failure here usually means the certificate or its chain is wrong. Re-check
 `security find-identity -v -p codesigning`.
+
+### Recovering a release that published without a DMG
+
+The tag and the GitHub Release are created by the `release-please` job; the DMG
+is built and attached afterwards by the `dmg` job. If the `dmg` job fails —
+notarization rejected, verification failed, the upload timed out — the release
+is already public with no DMG on it.
+
+**Use *Re-run failed jobs*. Never *Re-run all jobs*.** Re-running all jobs
+re-runs `release-please`, which now sees the release it already made, reports
+nothing releasable, and resolves the created flag false — which *skips* the
+`dmg` job rather than failing it. The run goes green and the release stays
+DMG-less, with no obvious sign anything went wrong. *Re-run failed jobs* keeps
+the original `release-please` job's outputs, so the `dmg` job still sees the
+right tag.
+
+If the failure is in the build itself, fix it on `main` first — but note that
+re-running the job checks out the commit the run started from, not your fix.
+For a fix that has to be in the artifact, cut a new patch release.
+
+If the DMG was built and only a later step failed, you do not have to rebuild
+or re-notarize it at all: the `dmg` job uploads `dist/*.dmg` as a run artifact
+named `Feedbax-dmg` unconditionally, immediately after the build, precisely so
+a multi-minute notarization is never thrown away by a failure below it. Download
+it from the failed run's summary page and attach it by hand:
+
+```sh
+gh run download <run-id> --repo mindlace/feedbax --name Feedbax-dmg --dir /tmp/dmg
+gh release upload v<version> /tmp/dmg/Feedbax-<version>.dmg --repo mindlace/feedbax --clobber
+```
+
+Verify what you attached before trusting it:
+
+```sh
+spctl -a -vvv -t open --context context:primary-signature /tmp/dmg/Feedbax-<version>.dmg
+xcrun stapler validate /tmp/dmg/Feedbax-<version>.dmg
+```
 
 ### Where a user's files go
 
