@@ -178,8 +178,12 @@ capture is the correct replacement for `usetexture`/`to_texture` under `glcore`,
 errors. Two non-obvious points the written design didn't capture:
 
 * **Draw order is by `@layer`, not by bang order.** With children `@automatic 1`, the node draws
-  them in ascending `@layer`. New material must sit *below* the feedback plane (lower `@layer`) so
-  the plane composites over it, exactly as Sean's manual bang order did.
+  them in ascending `@layer`. ~~New material must sit *below* the feedback plane (lower `@layer`) so
+  the plane composites over it, exactly as Sean's manual bang order did.~~ **Corrected 2026-08-29
+  (finding J):** that was true only for the waveform graphs. Sean's bang order put the *sticker*
+  layer **above** the plane (it is `@automatic`, drawn on the render bang, after the manual plane
+  bang), and under the plane's additive `(SRC_ALPHA, DST_ALPHA)` composite a sticker below it is
+  re-added every frame and saturates to white. Correct layering: sticker 20 > plane 10 > graphs 3.
 * A textureless feedback plane at a *high* layer paints an opaque quad over everything and the
   node captures black forever — the first probe was black for this reason. Fixed by layering.
 
@@ -204,7 +208,8 @@ errors. Two non-obvious points the written design didn't capture:
   a resolution preset now sets the capture-texture dims).
 
 `patches/feedbax.picsvid.maxpat`: `jit.gl.layer` (`obj-2`) reparented `foo` → `fb`, `@automatic 1`
-(kept `@layer 2`, `@enable 0`). `patches/feedbax.sound2.maxpat`: both `jit.gl.graph` (`obj-12`,
+(kept `@layer 2`, `@enable 0` — **`@layer 2` was wrong; raised to `@layer 20` on 2026-08-29, see
+finding J**). `patches/feedbax.sound2.maxpat`: both `jit.gl.graph` (`obj-12`,
 `obj-213`) reparented `foo` → `fb`, `@automatic 0` → `1`, `@layer 3`.
 
 ### What was verified in Max 9
@@ -261,5 +266,47 @@ with a `js` probe inside `feedbax.picsvid` (attribute dumps + outlet taps + scre
   `jit.grab @drawto foo` [obj-113] (camera) was left alone — same class of risk, not tested.
 
 Verified: fresh load with `Pluto-transparent.png` present → the disc lands in the `fb` node and
-recirculates (it blows out to white within a second — that is open item 2, trail-fade parity,
-not the sticker path); fresh load with the folder empty → no rectangle (Console not inspected in these runs).
+recirculates (it blows out to white within a second — ~~that is open item 2, trail-fade parity,
+not the sticker path~~ **wrong attribution; it was the sticker path's draw order, finding J
+below**); fresh load with the folder empty → no rectangle (Console not inspected in these runs).
+
+## Addendum 2026-08-29 (later) — the sticker white-out is draw order, not trail fade
+
+Symptom: with H and I fixed, Pluto appears and within a second becomes a saturated white disc that
+stays white. Sean's builds never did this.
+
+* **J. The retrofit put the sticker layer *under* the additive feedback plane.** In Sean's file
+  (`v122debuggingisg` and `v123`, identical here) the per-frame trigger `t to_texture b b b b b b
+  erase` [obj-50] fires: erase → dst/fst bang → `imgbang` → `audiobang` → `ctrlbang` → **bang the
+  plane** [obj-44, `@automatic 0`] → **bang the render** → `to_texture`. The picsVid layer
+  `jit.gl.layer foo @layer 2 @enable 0 …` has no `@automatic` key, i.e. it is automatic and is drawn
+  by the *render* bang — **after** the plane — with `jit.gl.layer`'s default alpha blend and depth
+  test off. (`imgbang` reaches the layer only through `gate` [pv:obj-307] behind an unfed toggle
+  [pv:obj-316], so it never drew earlier.) That makes the sticker a convex stamp on top of the
+  loop: `FB' = S_a·S + (1−S_a)·warp(FB)`, bounded by the sticker's own brightness. The waveform
+  graphs, by contrast, are `@automatic 0` and are banged by `audiobang` — *before* the plane — so
+  they are under the plane's `(SRC_ALPHA, DST_ALPHA)` composite and are *added* into the loop each
+  frame; the retrofit's `@layer 3` preserves that.
+
+  The retrofit made the plane `@automatic 1 @layer 10` and left the sticker at `@layer 2`, i.e.
+  under the plane. Inside the `fb` FBO (cleared to alpha 1) `DST_ALPHA = 1`, so the plane
+  composite is `FB' = clip(S + warp(FB))`: the sticker is injected additively every frame with
+  loop gain 1 and no loss term, and its footprint clips to white in a handful of frames. Sean's
+  `@layer 2` never meant "below the plane" — the plane was `@automatic 0`, outside the layer
+  system entirely.
+
+  Evidence: (a) a per-pixel loop map (single channel, bilinear warp, hard clear, both orders,
+  six (theta, zoom) vectors) — sticker-under-plane reaches max = 1.00 by frame 5 for every vector
+  and the saturated area grows with outward zoom (4 % → 62 % of the frame by frame 90); sticker-
+  on-top never exceeds the sticker's own value (0.55) for any vector. (b) Live on Max 9.1.5: HEAD
+  (`@layer 2`) captured 5–20 s after launch is a white disc with 1.9 % near-white pixels; with only
+  `@layer 2 → @layer 20` changed, Pluto renders with full surface detail and holds for 30 s at
+  0.2 % near-white. Nothing else was touched.
+
+  Fix: `patches/feedbax.picsvid.maxpat` [obj-2] `jit.gl.layer fb @layer 2 …` → `@layer 20`.
+  The camera path (`jit.grab` → the same layer) gets the same correction for free. Open item 2
+  above ("trail-fade parity") is unrelated to this symptom and remains as written.
+
+  Still visible after the fix, and *not* a regression: with no audio input the two `jit.gl.graph`
+  waveforms (flat silence lines) are added under the plane every frame and saturate into bands —
+  that is Sean's own order (`audiobang` before the plane bang), so it was left alone.

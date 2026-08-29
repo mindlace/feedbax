@@ -62,18 +62,32 @@ every tick of metro (60 Hz default; presets 30/60/90/100/120):
                     tex = hsl_shift(tex; +hue_shift, +sat_delta, +light_delta)
                     [v122 Max-8 builds only: tex = brcosa(tex; brightness, contrast, saturation)]
        → mainPlane.texture = tex
-  3. s imgbang  → picsVid: if camera on, grab a new frame; (stickers are static textures; layer 2)
+  3. s imgbang  → picsVid: if camera on, grab a new frame. (Does NOT draw the sticker layer — see step 7.)
   4. s audiobang→ sound2: dump jit.catch~ buffers → draw waveform 1 (radial, bottom) and waveform 2
   5. s ctrlbang → webUI re-evaluates shadeCtl (60 Hz, pushed on change); Leap timer; bump gates
   6. bang mainPlane                   # draws the transformed previous frame: scale (+1.78·xyratio, 1, 1),
                                       #   position (0,0,−0.414+worldBump), blend (SRC_ALPHA, DST_ALPHA), colour (1,1,1,1)
-  7. bang render                      # draw + swap
+  7. bang render                      # draws every @automatic object — i.e. the picsVid jit.gl.layer (sticker /
+                                      #   camera), alpha-blended ON TOP of the plane — then swaps
   8. render.to_texture                # capture the framebuffer into the feedback texture for the next tick
 ```
 
-Draw order is explicit (everything is `@automatic 0`), so the image layer and waveforms are drawn
-*before* the feedback plane is blended over them, and the plane's alpha comes from the captured
-frame itself. Details, defaults and the exact object wiring: §01.
+Draw order is explicit for the manually banged objects, and the two kinds of injected material
+land on *opposite* sides of the feedback plane:
+
+- **Waveforms** (`jit.gl.graph`, `@automatic 0`, banged at step 4) are drawn *before* the plane, so
+  the plane's `(SRC_ALPHA, DST_ALPHA)` composite **adds** the warped previous frame on top of them —
+  they inject energy into the loop every frame.
+- **The sticker/camera `jit.gl.layer`** carries no `@automatic` in Sean's file (default = automatic),
+  so it is drawn by the render bang at step 7, *after* the plane, with `jit.gl.layer`'s default alpha
+  blend — a convex stamp that can never exceed the sticker's own brightness. (`imgbang` only reaches
+  the layer through a gate that is closed by default.)
+
+Post-retrofit (`jit.gl.node fb`, everything `@automatic 1`) this order is carried by `@layer`:
+sticker **20** > plane **10** > waveform graphs **3**. Putting the sticker *under* the plane
+(`@layer 2`, the retrofit's first state) re-adds it every frame and saturates it to white within a
+second — measured 2026-08-29, see `docs/diagnosis-2026-08-23.md` finding J. Details, defaults and
+the exact object wiring: §01.
 
 ## The control vector
 
