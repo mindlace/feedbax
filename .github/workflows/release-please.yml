@@ -76,14 +76,24 @@ jobs:
           keychain_password="$(uuidgen)"
 
           security create-keychain -p "$keychain_password" "$keychain"
+          # Recorded immediately, before anything that can fail: the final
+          # always()-cleanup step needs this to find and delete the keychain
+          # even if a later command below fails partway through. Recording it
+          # only after a fully successful import would leave a half-built
+          # keychain that cleanup has no name for.
+          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
           security set-keychain-settings -lut 3600 "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
 
+          # Trap set before the decoded private key ever touches disk, so it
+          # is removed on success, on failure, and on cancellation alike —
+          # not just on the happy path via a trailing rm.
+          trap 'rm -f "$RUNNER_TEMP/cert.p12"' EXIT
           echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" \
             -k "$keychain" -P "$CERT_PASSWORD" \
             -T /usr/bin/codesign -T /usr/bin/security
-          rm -f "$RUNNER_TEMP/cert.p12"
 
           # Without this, codesign blocks on a GUI keychain prompt that no one
           # can answer on a runner.
@@ -94,8 +104,6 @@ jobs:
           security list-keychains -d user -s "$keychain" login.keychain-db
           security find-identity -v -p codesigning "$keychain"
 
-          echo "SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
-
       - name: Store notarization credentials
         env:
           NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
@@ -103,13 +111,15 @@ jobs:
           NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
         run: |
           set -euo pipefail
+          # Trap set before the decoded key ever touches disk (see the
+          # cert-import step above for the same reasoning).
+          trap 'rm -f "$RUNNER_TEMP/notary.p8"' EXIT
           echo "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
           xcrun notarytool store-credentials "$NOTARY_PROFILE" \
             --key "$RUNNER_TEMP/notary.p8" \
             --key-id "$NOTARY_KEY_ID" \
             --issuer "$NOTARY_ISSUER_ID" \
             --keychain "$SIGNING_KEYCHAIN"
-          rm -f "$RUNNER_TEMP/notary.p8"
 
           # build-dmg.sh must name the same keychain on every notarytool call —
           # a profile stored here is invisible to a bare --keychain-profile.
