@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.123.1](https://github.com/mindlace/feedbax/compare/v0.123.0...v0.123.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* **release:** draft the release, attach the DMG, then publish ([80b3c7c](https://github.com/mindlace/feedbax/commit/80b3c7c57419ce6abf2d893965f63b91c2fceb2a))
+* **release:** drop package-name so release-please can tag its own release PR ([ef709c8](https://github.com/mindlace/feedbax/commit/ef709c8aedf01ec1df4055dbf04ba2842140ca7b))
+
 ## [0.123.0](https://github.com/mindlace/feedbax/compare/v0.122.0...v0.123.0) (2026-08-29)
 
 
