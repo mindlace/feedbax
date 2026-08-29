@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.123.0](https://github.com/mindlace/feedbax/compare/v0.123.0...v0.123.0) (2026-08-29)
+## [0.123.0](https://github.com/mindlace/feedbax/compare/v0.122.0...v0.123.0) (2026-08-29)
 
 
 ### Features
@@ -17,3 +17,4 @@
 * **patches:** make project-root resolution work and open the feedback path at load ([3bc5220](https://github.com/mindlace/feedbax/commit/3bc522078143a6a29675b54031ed637c0106b568))
 * **patches:** retrofit feedback capture to jit.gl.node for Max 9 (finding G) ([2972bfe](https://github.com/mindlace/feedbax/commit/2972bfe0e7aaf3de1cab1a83838b19305381e0bc))
 * **picsvid:** make image loading emit a texture on Max 9, drop dead cluster ([d5c4d2e](https://github.com/mindlace/feedbax/commit/d5c4d2e394d68a93dcbe53ecd52a930c39494072))
+* **release:** reseed the manifest so 0.123.0 is a genuine bump ([e7797a7](https://github.com/mindlace/feedbax/commit/e7797a7548e78000f66395d866250d8ba7c49836))
