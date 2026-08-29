@@ -31,6 +31,9 @@ preflight() {
   [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
     || die "VERSION '$VERSION' is not a bare semver"
 
+  [[ "$BUILD_NUMBER" =~ ^[0-9]+$ ]] \
+    || die "BUILD_NUMBER '$BUILD_NUMBER' is not a non-empty digit string"
+
   command -v xcodegen >/dev/null \
     || die "xcodegen not found — brew install xcodegen"
 
@@ -79,7 +82,10 @@ archive() {
     CODE_SIGN_STYLE=Manual \
     CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
     ENABLE_HARDENED_RUNTIME=YES \
-    OTHER_CODE_SIGN_FLAGS='--timestamp'
+    OTHER_CODE_SIGN_FLAGS='--timestamp' \
+    ARCHS=arm64 # the engine uses SIMD Float16, which has no x86_64 lowering in Swift,
+                # so the default universal-binary archive can't compile that slice;
+                # Apple silicon only until the engine drops Float16 SIMD
 }
 
 export_app() {
