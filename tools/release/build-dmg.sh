@@ -41,14 +41,17 @@ preflight() {
     || die "DEVELOPER_DIR='$DEVELOPER_DIR' has no xcodebuild — point it at a full Xcode, not CommandLineTools"
 
   [[ -n "${DEVELOPMENT_TEAM:-}" ]] \
-    || die "DEVELOPMENT_TEAM is unset — see docs/dev/releasing.md §1.1"
+    || die "DEVELOPMENT_TEAM is unset — see docs/dev/releasing.md, Part 1"
 
-  security find-identity -v -p codesigning | grep -q "$SIGNING_IDENTITY" \
-    || die "no '$SIGNING_IDENTITY' identity in the keychain — see docs/dev/releasing.md §1.4"
+  # Herestring rather than a pipe throughout this script: `grep -q` exits on the
+  # first match, the producer then dies of SIGPIPE, and `pipefail` reports the
+  # whole pipeline as failed even though the match succeeded.
+  grep -q "$SIGNING_IDENTITY" <<<"$(security find-identity -v -p codesigning)" \
+    || die "no '$SIGNING_IDENTITY' identity in the keychain — see docs/dev/releasing.md, Building locally"
 
   if [[ -z "$SKIP_NOTARIZE" ]]; then
     xcrun notarytool history "${notary_args[@]}" >/dev/null 2>&1 \
-      || die "notarytool profile '$NOTARY_PROFILE' unusable — see docs/dev/releasing.md §1.5, or set SKIP_NOTARIZE=1"
+      || die "notarytool profile '$NOTARY_PROFILE' unusable — see docs/dev/releasing.md, Building locally, or set SKIP_NOTARIZE=1"
   fi
 
   echo "version         $VERSION ($BUILD_NUMBER)"
@@ -104,7 +107,7 @@ export_app() {
 
   step "Verifying the exported app"
   codesign --verify --deep --strict --verbose=2 "$app_path"
-  codesign -dv --verbose=4 "$app_path" 2>&1 | grep -q 'flags=.*runtime' \
+  grep -q 'flags=.*runtime' <<<"$(codesign -dv --verbose=4 "$app_path" 2>&1)" \
     || die "exported app is not hardened-runtime signed"
 
   local plist="$app_path/Contents/Info.plist" got
@@ -152,8 +155,8 @@ submit_for_notarization() {
 
   if [[ "$submit_status" -ne 0 ]]; then
     local submission_id
-    submission_id="$(printf '%s\n' "$submit_output" \
-      | grep -m1 -E '^\s*id:' | awk '{print $2}')" || true
+    submission_id="$(grep -m1 -E '^\s*id:' <<<"$submit_output" \
+      | awk '{print $2}')" || true
 
     if [[ -n "$submission_id" ]]; then
       step "Notarization failed — fetching Apple's log for $submission_id"
@@ -263,7 +266,7 @@ verify_dmg() {
     echo "spctl $form → exit $status"
     echo "$out"
     if [[ "$status" -eq 0 ]] \
-      && printf '%s\n' "$out" | grep -q 'source=Notarized Developer ID'; then
+      && grep -q 'source=Notarized Developer ID' <<<"$out"; then
       accepted=1
     fi
   done
