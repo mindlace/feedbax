@@ -131,6 +131,9 @@ Both entry points call the same `AppBootstrap.start()` and show the same `Feedba
 Re-run `xcodegen generate` after editing `project.yml`; source changes need nothing — the
 project references the package, not individual files.
 
+For a distributable, signed, notarized DMG — and the Apple Developer setup it
+needs — see [`docs/dev/releasing.md`](../docs/dev/releasing.md).
+
 ## The performance gate (soak mode)
 
 `feedbax-dev --soak` runs the engine headless — no window, no display link — and prints frame
