@@ -207,6 +207,45 @@ Two consequences worth knowing:
   does not exist. Fix the cause, re-run the failed jobs, and the same draft
   gets its asset and goes public.
 
+### Why release-please runs twice
+
+The workflow invokes release-please in two jobs, `release-please` (with
+`skip-github-pull-request`) and `next-release-pr` (with `skip-github-release`),
+with the `dmg` job between them. That is not tidiness — a single invocation is
+actively broken here, and the way it breaks is dangerous.
+
+In one invocation release-please creates the release and then, immediately,
+computes the next release PR. But the release it just created is a *draft*, and
+**release-please cannot see its own draft**. It logs:
+
+```
+looking for tagName: v0.123.1
+⚠ Expected 1 releases, only found 0
+```
+
+and falls back to walking the entire commit history — where it finds the
+one-time `Release-As:` pin from the first release, still sitting there, and
+obeys it. The result is a release PR proposing a **downgrade** to the pinned
+version, opened on every release, looking exactly like a normal
+`chore: release main` PR. Merging one rolls `version.txt` backwards.
+
+Splitting the invocations means the PR is computed only after the DMG job has
+published the release, so the fallback never triggers. `next-release-pr` runs
+when `dmg` succeeds *or* is skipped (the ordinary-push case, where the PR still
+has to be opened) but deliberately not when `dmg` fails — a failed build leaves
+an unpublished draft, which is the invisible-release state all over again.
+
+**The stale pin is permanent.** `Release-As: 0.123.0` lives in the messages of
+`5d73e7d` and `e7797a7` on `main` and cannot be removed without rewriting public
+history. Anything that makes release-please walk the full history will find it
+again. When pinning a version in future, put the footer in a throwaway empty
+commit as described above — never in a squash-merge message, which becomes
+permanent history.
+
+**How to recognize a bogus release PR:** its changelog heading compares
+backwards, `compare/v0.123.1...v0.123.0`. Close it; do not merge it. A re-run
+against the published release will say `No commits for path: ., skipping`.
+
 ### The normal path
 
 1. Land work on `main` with Conventional Commits — `feat:` bumps the minor
