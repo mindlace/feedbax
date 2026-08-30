@@ -78,7 +78,7 @@ public final class AppBootstrap {
       imageBumpEnabled: { engine.bumpsEnabled.image },
       wave1Enabled: { engine.waveforms.wave1Enabled },
       wave2Enabled: { engine.waveforms.wave2Enabled },
-      layerEnabled: { engine.sticker.layer.enabled },
+      imageEnabled: { engine.sticker.layer.enabled },
       // Relative trackpad gestures nudge from HERE (design §5), not from a private accumulator.
       rawValue: { engine.router.rawValue(for: $0) })
     let keyboard = KeyboardTrackpadSurface(bindings: bindings, stateSnapshot: stateSnapshot)

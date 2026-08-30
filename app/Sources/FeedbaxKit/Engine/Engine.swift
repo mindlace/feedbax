@@ -219,7 +219,7 @@ public final class Engine {
     // 2b. Image-layer placement: the router's ramped `imageMove` (spec §02 §4; design §4)
     // lands on BOTH sources every frame. The original had one picsvid layer whose transform
     // came from `imageMove` whether it showed a picture or a video — the same reason
-    // `handle(.layerEnabled:)` keeps both `.enabled` flags in lockstep. This is the layer's
+    // `handle(.imageEnabled:)` keeps both `.enabled` flags in lockstep. This is the layer's
     // BASE placement; stage 3's kitty offset is additive on top and restored afterward.
     sticker.transform = router.layerTransform
     movie.transform = router.layerTransform
@@ -307,9 +307,20 @@ public final class Engine {
   /// performer already made.
   public func applyColdStartImageDefaults() {
     guard sticker.itemCount > 0 else { return }
-    handle(.layerEnabled(true))   // not a direct write — keeps sticker/movie in lockstep
+    showImage()   // not a direct write — keeps sticker/movie in lockstep
     bumpsEnabled.image = true
   }
+
+  /// Whether an image is currently drawing. There is no separate switch for this any more —
+  /// it is what the picker's selection says (2026-08-29 design doc §3): choosing an image
+  /// shows it, choosing `Off` hides it, and an empty folder shows nothing.
+  public var isImageShown: Bool { sticker.layer.enabled }
+
+  /// Show the currently selected image. Hiding never disturbs `selectedIndex`, so this brings
+  /// back exactly the image that was showing before `hideImage()`.
+  public func showImage() { handle(.imageEnabled(true)) }
+
+  public func hideImage() { handle(.imageEnabled(false)) }
 
   // MARK: - Toggle routing (spec §01 §4's toggle table, minus `.sInvert` — `ControlRouter`
   // consumes that one itself and never forwards it here)
@@ -321,7 +332,7 @@ public final class Engine {
     case .imageBumpEnabled(let on): bumpsEnabled.image = on
     case .wave1Enabled(let on): waveforms.wave1Enabled = on
     case .wave2Enabled(let on): waveforms.wave2Enabled = on
-    case .layerEnabled(let on):
+    case .imageEnabled(let on):
       // The original's "pic enable" toggle (spec §04 §1.4: default off, nothing draws until
       // turned on) — both sources share one flag rather than each tracking its own, because
       // only the ACTIVE one (`layerMode`) is ever ticked/drawn; the inactive one's flag is
@@ -371,7 +382,7 @@ public final class Engine {
     preset.toggles.kittyBump = bumpsEnabled.image
     preset.toggles.wave1 = waveforms.wave1Enabled
     preset.toggles.wave2 = waveforms.wave2Enabled
-    // Sticker/movie `.enabled` are kept in lockstep by `handle(.layerEnabled:)` above, so
+    // Sticker/movie `.enabled` are kept in lockstep by `handle(.imageEnabled:)` above, so
     // either one reads the same single logical flag.
     preset.toggles.layerEnabled = sticker.layer.enabled
     preset.layerMode = layerMode.presetIdentifier

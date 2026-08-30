@@ -20,7 +20,7 @@ public enum ToggleEvent: Equatable, Codable {
   case imageBumpEnabled(Bool)
   case wave1Enabled(Bool)
   case wave2Enabled(Bool)
-  case layerEnabled(Bool)
+  case imageEnabled(Bool)
   case fullscreen
   case stillCapture
 }
@@ -98,7 +98,7 @@ public struct ControlStateSnapshot {
   public var imageBumpEnabled: () -> Bool
   public var wave1Enabled: () -> Bool
   public var wave2Enabled: () -> Bool
-  public var layerEnabled: () -> Bool
+  public var imageEnabled: () -> Bool
   /// The router's current RAW value for any axis (design §5). A relative gesture nudges FROM
   /// this at poll time rather than from a private accumulator — otherwise a slider or preset
   /// that moved the axis is undone by the next trackpad nudge (spec §2, finding 1).
@@ -107,7 +107,7 @@ public struct ControlStateSnapshot {
   public init(sInvert: @escaping () -> Bool, worldBumpEnabled: @escaping () -> Bool,
               waveBumpEnabled: @escaping () -> Bool, imageBumpEnabled: @escaping () -> Bool,
               wave1Enabled: @escaping () -> Bool, wave2Enabled: @escaping () -> Bool,
-              layerEnabled: @escaping () -> Bool,
+              imageEnabled: @escaping () -> Bool,
               rawValue: @escaping (ControlAxis) -> Float = { _ in 0 }) {
     self.sInvert = sInvert
     self.worldBumpEnabled = worldBumpEnabled
@@ -115,7 +115,7 @@ public struct ControlStateSnapshot {
     self.imageBumpEnabled = imageBumpEnabled
     self.wave1Enabled = wave1Enabled
     self.wave2Enabled = wave2Enabled
-    self.layerEnabled = layerEnabled
+    self.imageEnabled = imageEnabled
     self.rawValue = rawValue
   }
 
@@ -133,7 +133,7 @@ public struct ControlStateSnapshot {
     case .imageBumpEnabled: return imageBumpEnabled()
     case .wave1Enabled: return wave1Enabled()
     case .wave2Enabled: return wave2Enabled()
-    case .layerEnabled: return layerEnabled()
+    case .imageEnabled: return imageEnabled()
     case .fullscreen, .stillCapture: return nil
     }
   }
@@ -149,7 +149,7 @@ public struct ControlStateSnapshot {
                               rawValue: @escaping (ControlAxis) -> Float = { _ in 0 }) -> ControlStateSnapshot {
     ControlStateSnapshot(sInvert: { value }, worldBumpEnabled: { value }, waveBumpEnabled: { value },
                          imageBumpEnabled: { value }, wave1Enabled: { value }, wave2Enabled: { value },
-                         layerEnabled: { value }, rawValue: rawValue)
+                         imageEnabled: { value }, rawValue: rawValue)
   }
 }
 
@@ -164,7 +164,7 @@ extension ToggleEvent {
     case .imageBumpEnabled: return "Image bump"
     case .wave1Enabled: return "Wave 1"
     case .wave2Enabled: return "Wave 2"
-    case .layerEnabled: return "Layer enable"
+    case .imageEnabled: return "Image on/off"
     case .fullscreen: return "Fullscreen"
     case .stillCapture: return "Still capture"
     }

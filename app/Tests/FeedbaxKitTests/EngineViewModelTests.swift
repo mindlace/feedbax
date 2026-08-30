@@ -110,7 +110,7 @@ final class EngineViewModelTests: XCTestCase {
       imageBumpEnabled: { engine.bumpsEnabled.image },
       wave1Enabled: { engine.waveforms.wave1Enabled },
       wave2Enabled: { engine.waveforms.wave2Enabled },
-      layerEnabled: { engine.sticker.layer.enabled })
+      imageEnabled: { engine.sticker.layer.enabled })
     let keyboard = KeyboardTrackpadSurface(bindings: try BindingsLoader.load(from: nil),
                                            stateSnapshot: keyboardSnapshot)
     keyboard.keyDown("i")
@@ -191,5 +191,51 @@ final class EngineViewModelTests: XCTestCase {
     XCTAssertEqual(vm.bindings.pads[1], PadAssignment(x: .slot(.panX), y: .slot(.zoom)))
     XCTAssertEqual(try BindingsStore(userFileURL: file).bindings.pads[1].y, .slot(.zoom), "written to disk")
     try? FileManager.default.removeItem(at: dir)
+  }
+
+  func testPickingAnImageShowsIt() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data([0]).write(to: folder.appendingPathComponent("a.png"))
+    let engine = try Engine(context: try MetalContext(), stickerFolder: folder)
+    engine.hideImage()
+    let vm = EngineViewModel(engine: engine)
+
+    vm.setStickerIndex(0)
+
+    XCTAssertTrue(engine.isImageShown, "choosing an image is how you turn the layer on now")
+    XCTAssertTrue(vm.imageShown)
+  }
+
+  func testHideImageLeavesTheSelectionAlone() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data([0]).write(to: folder.appendingPathComponent("a.png"))
+    let engine = try Engine(context: try MetalContext(), stickerFolder: folder)
+    let vm = EngineViewModel(engine: engine)
+    vm.setStickerIndex(0)
+
+    vm.hideImage()
+
+    XCTAssertFalse(vm.imageShown)
+    XCTAssertEqual(vm.stickerIndex, 0)
+  }
+
+  func testImportingIntoAnEmptyFolderEndsWithTheImageShowing() throws {
+    let empty = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+    let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+    try Data([0]).write(to: inbox.appendingPathComponent("dropped.png"))
+
+    let engine = try Engine(context: try MetalContext(), stickerFolder: empty)
+    engine.applyColdStartImageDefaults()          // empty at launch, so nothing is shown
+    XCTAssertFalse(engine.isImageShown)
+    let vm = EngineViewModel(engine: engine)
+
+    vm.importStickers([inbox.appendingPathComponent("dropped.png")])
+
+    XCTAssertTrue(engine.isImageShown,
+                  "dropping images into an empty folder must not leave the picker inert")
   }
 }

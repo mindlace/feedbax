@@ -85,7 +85,10 @@ public struct OperatorPanel: View {
         }
         Section("Toggles") {
           Toggle("SInvert", isOn: Binding(get: { vm.sInvertOn }, set: { vm.setSInvert($0) }))
-          Toggle("Layer Enable", isOn: Binding(get: { vm.layerOn }, set: { vm.setLayerEnabled($0) }))
+          // TODO(Task 4): this toggle is being replaced by the picker's `Off` tile — selection
+          // is the on/off state now (2026-08-29 design doc §3).
+          Toggle("Layer Enable", isOn: Binding(get: { vm.imageShown },
+                                               set: { $0 ? vm.showSelectedImage() : vm.hideImage() }))
           Toggle("Wave 1", isOn: Binding(get: { vm.wave1On }, set: { vm.setWave1Enabled($0) }))
           Toggle("Wave 2", isOn: Binding(get: { vm.wave2On }, set: { vm.setWave2Enabled($0) }))
           Toggle("World Bump", isOn: Binding(get: { vm.worldBumpOn }, set: { vm.setWorldBumpEnabled($0) }))

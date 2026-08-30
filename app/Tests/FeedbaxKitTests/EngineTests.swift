@@ -168,4 +168,27 @@ final class EngineTests: XCTestCase {
     XCTAssertTrue(e.sticker.layer.enabled, "an empty folder must not switch an enabled layer off")
     XCTAssertTrue(e.bumpsEnabled.image)
   }
+
+  func testShowAndHideImageKeepTheSelectionAndTheLockstep() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data([0]).write(to: folder.appendingPathComponent("a.png"))
+    try Data([0]).write(to: folder.appendingPathComponent("b.png"))
+
+    let e = try Engine(context: try MetalContext(), stickerFolder: folder)
+    e.sticker.selectedIndex = 1
+    e.showImage()
+    XCTAssertTrue(e.isImageShown)
+
+    e.hideImage()
+
+    XCTAssertFalse(e.isImageShown)
+    XCTAssertFalse(e.movie.layer.enabled, "lockstep holds through hide")
+    XCTAssertEqual(e.sticker.selectedIndex, 1,
+                   "hiding must not disturb the selection — showing again brings back the same image")
+
+    e.showImage()
+    XCTAssertTrue(e.isImageShown)
+    XCTAssertEqual(e.sticker.selectedIndex, 1)
+  }
 }

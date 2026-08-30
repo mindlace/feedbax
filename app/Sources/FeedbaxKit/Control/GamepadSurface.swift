@@ -92,7 +92,7 @@ public final class GamepadSurface: ControlSurface {
     .init(input: "D-pad right / left", modifiers: "",
           action: "\(ControlAxis.slot(.saturation).displayName) +\(ControlReference.stepText(GamepadSurface.saturationStepMagnitude)) / −\(ControlReference.stepText(GamepadSurface.saturationStepMagnitude))", kind: "step"),
     .init(input: "A", modifiers: "", action: ToggleEvent.sInvert(true).displayName, kind: "toggle"),
-    .init(input: "B", modifiers: "", action: ToggleEvent.layerEnabled(true).displayName, kind: "toggle"),
+    .init(input: "B", modifiers: "", action: ToggleEvent.imageEnabled(true).displayName, kind: "toggle"),
     .init(input: "X", modifiers: "", action: ToggleEvent.wave1Enabled(true).displayName, kind: "toggle"),
     .init(input: "Y", modifiers: "", action: ToggleEvent.wave2Enabled(true).displayName, kind: "toggle"),
     .init(input: "Menu", modifiers: "", action: ToggleEvent.fullscreen.displayName, kind: "one-shot"),
@@ -233,7 +233,7 @@ public final class GamepadSurface: ControlSurface {
     for button in pressed.subtracting(previousButtons) {
       switch button {
       case "a": toggles.append(flip(.sInvert(true)))
-      case "b": toggles.append(flip(.layerEnabled(true)))
+      case "b": toggles.append(flip(.imageEnabled(true)))
       case "x": toggles.append(flip(.wave1Enabled(true)))
       case "y": toggles.append(flip(.wave2Enabled(true)))
       case "menu": toggles.append(.fullscreen)   // one-shot — no flip state, like keyboard "f"

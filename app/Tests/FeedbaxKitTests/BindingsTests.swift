@@ -96,8 +96,8 @@ final class BindingsTests: XCTestCase {
   /// cosmetic change — it is a startup failure for anyone with a saved bindings file.
   func testPersistedToggleMarkersAreFrozen() throws {
     XCTAssertEqual(ToggleEvent.imageBumpEnabled(true).marker, "kittyBumpEnabled")
-    XCTAssertEqual(ToggleEvent.layerEnabled(true).marker, "layerEnabled")
+    XCTAssertEqual(ToggleEvent.imageEnabled(true).marker, "layerEnabled")
     XCTAssertEqual(ToggleEvent.fromMarker("kittyBumpEnabled", flip: true), .imageBumpEnabled(true))
-    XCTAssertEqual(ToggleEvent.fromMarker("layerEnabled", flip: true), .layerEnabled(true))
+    XCTAssertEqual(ToggleEvent.fromMarker("layerEnabled", flip: true), .imageEnabled(true))
   }
 }
