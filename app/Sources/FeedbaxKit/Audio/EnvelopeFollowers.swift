@@ -4,7 +4,7 @@ import Foundation
 /// / slide`, using `up` while rising (`x >= y`) and `down` while falling — `up`/`down` are in
 /// samples-to-converge, not ms (the Max object's own units). This is the *signal-rate* form,
 /// stepped once per audio sample — used inside `AudioBands`' worldBump chain (spec §03 §7a)
-/// and, per-cell, inside `WaveBuffer`'s `jit.slide` port. `KittyBumpReceiver` (spec §04 §1.3)
+/// and, per-cell, inside `WaveBuffer`'s `jit.slide` port. `ImageBumpReceiver` (spec §04 §1.3)
 /// uses the same struct but steps it once per *received value* instead — Max's non-tilde
 /// `slide` object is the control-rate sibling of `slide~` and shares this exact recurrence.
 public struct SlideEnvelope {

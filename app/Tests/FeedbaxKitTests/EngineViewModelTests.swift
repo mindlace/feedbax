@@ -107,7 +107,7 @@ final class EngineViewModelTests: XCTestCase {
       sInvert: { engine.router.sInvert < 0 },
       worldBumpEnabled: { engine.bumpsEnabled.world },
       waveBumpEnabled: { engine.bumpsEnabled.wave },
-      kittyBumpEnabled: { engine.bumpsEnabled.kitty },
+      imageBumpEnabled: { engine.bumpsEnabled.image },
       wave1Enabled: { engine.waveforms.wave1Enabled },
       wave2Enabled: { engine.waveforms.wave2Enabled },
       layerEnabled: { engine.sticker.layer.enabled })

@@ -103,7 +103,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   @Published public private(set) var wave2On = true
   @Published public private(set) var worldBumpOn = false
   @Published public private(set) var waveBumpOn = false
-  @Published public private(set) var kittyBumpOn = false
+  @Published public private(set) var imageBumpOn = false
 
   public func setSInvert(_ on: Bool) { sInvertOn = on; pendingToggles.append(.sInvert(on)) }
   public func setLayerEnabled(_ on: Bool) { layerOn = on; pendingToggles.append(.layerEnabled(on)) }
@@ -115,8 +115,8 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   public func setWaveBumpEnabled(_ on: Bool) {
     waveBumpOn = on; pendingToggles.append(.waveBumpEnabled(on))
   }
-  public func setKittyBumpEnabled(_ on: Bool) {
-    kittyBumpOn = on; pendingToggles.append(.kittyBumpEnabled(on))
+  public func setImageBumpEnabled(_ on: Bool) {
+    imageBumpOn = on; pendingToggles.append(.imageBumpEnabled(on))
   }
 
   // MARK: - ControlSurface
@@ -186,8 +186,8 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     if worldBumpOn != newWorldBumpOn { worldBumpOn = newWorldBumpOn }
     let newWaveBumpOn = engine.bumpsEnabled.wave
     if waveBumpOn != newWaveBumpOn { waveBumpOn = newWaveBumpOn }
-    let newKittyBumpOn = engine.bumpsEnabled.kitty
-    if kittyBumpOn != newKittyBumpOn { kittyBumpOn = newKittyBumpOn }
+    let newImageBumpOn = engine.bumpsEnabled.image
+    if imageBumpOn != newImageBumpOn { imageBumpOn = newImageBumpOn }
     for axis in ControlAxis.live {
       let value = Double(engine.router.rawValue(for: axis))
       if axisValues[axis] != value { axisValues[axis] = value }
@@ -205,7 +205,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
       case .sInvert(let on): sInvertOn = on
       case .worldBumpEnabled(let on): worldBumpOn = on
       case .waveBumpEnabled(let on): waveBumpOn = on
-      case .kittyBumpEnabled(let on): kittyBumpOn = on
+      case .imageBumpEnabled(let on): imageBumpOn = on
       case .wave1Enabled(let on): wave1On = on
       case .wave2Enabled(let on): wave2On = on
       case .layerEnabled(let on): layerOn = on
@@ -436,7 +436,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     wave2On = preset.toggles.wave2
     worldBumpOn = preset.toggles.worldBump
     waveBumpOn = preset.toggles.waveBump
-    kittyBumpOn = preset.toggles.kittyBump
+    imageBumpOn = preset.toggles.kittyBump
   }
 
   // MARK: - HUD
@@ -522,7 +522,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
       wave2On = engine.waveforms.wave2Enabled
       worldBumpOn = engine.bumpsEnabled.world
       waveBumpOn = engine.bumpsEnabled.wave
-      kittyBumpOn = engine.bumpsEnabled.kitty
+      imageBumpOn = engine.bumpsEnabled.image
     }
     if presetStore != nil { refreshPresetList() }
   }

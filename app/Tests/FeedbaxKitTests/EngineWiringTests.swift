@@ -30,7 +30,7 @@ final class EngineWiringTests: XCTestCase {
   private var tempRoot: URL!
 
   /// Same CWD trick `GoldenFrameTests.setUpWithError` documents: `Engine.init` resolves its
-  /// sticker folder relative to the process's working directory, and the kitty-bump test
+  /// sticker folder relative to the process's working directory, and the image-bump test
   /// below needs a real sticker to displace.
   override func setUpWithError() throws {
     originalCwd = FileManager.default.currentDirectoryPath
@@ -227,7 +227,7 @@ final class EngineWiringTests: XCTestCase {
 
   /// Both seed sources take the router's ramped layer transform every frame — the original had
   /// ONE picsvid layer whose transform came from `imageMove` whether it showed a picture or a
-  /// video. The kitty offset (stage 3) is additive on top and restored, so after `step` the
+  /// video. The image offset (stage 3) is additive on top and restored, so after `step` the
   /// sources read exactly the router's value.
   func testBothSeedSourcesFollowTheRouterLayerTransform() throws {
     let ctx = try MetalContext()
@@ -344,28 +344,28 @@ final class EngineWiringTests: XCTestCase {
                          "the wave-bump gate must reach wave 2's alpha pulse")
   }
 
-  /// Part 2c: the kitty-bump gate is live and modulating.
+  /// Part 2c: the image-bump gate is live and modulating.
   ///
-  /// The kitty offset (step's stage 3) displaces the STICKER layer's transform for the
+  /// The image offset (step's stage 3) displaces the STICKER layer's transform for the
   /// duration of one draw, so this needs the sticker layer enabled and a real glyph to move
   /// (see `setUpWithError`). Audio is re-ingested every frame because `frameValues()` drains
-  /// the accumulator, and several frames are run because `KittyBumpReceiver`'s `slide 22 14`
+  /// the accumulator, and several frames are run because `ImageBumpReceiver`'s `slide 22 14`
   /// climbs over frames rather than jumping — one frame would test the slide's first step,
-  /// not the wiring. `EngineTests.testKittyOffsetDoesNotAccumulate` pins the other half of
+  /// not the wiring. `EngineTests.testImageOffsetDoesNotAccumulate` pins the other half of
   /// this contract (the offset is undone after the draw); this pins that it is applied at all.
-  func testKittyBumpGateIsLiveAndModulatesTheFrame() throws {
+  func testImageBumpGateIsLiveAndModulatesTheFrame() throws {
     let ctx = try MetalContext()
     let burst = Array(bandMixture(seconds: 1.0).prefix(400))
     func run(gate: Bool) throws -> [SIMD4<Float>] {
       try render(frames: 12, context: ctx, configure: { engine in
         engine.sticker.layer.enabled = true
-        engine.bumpsEnabled.kitty = gate
+        engine.bumpsEnabled.image = gate
       }, perFrame: { engine, _ in
         engine.bands.ingest(burst)
       })
     }
     XCTAssertGreaterThan(differingFraction(try run(gate: true), try run(gate: false)), 0.0,
-                         "the kitty-bump gate must displace the sticker layer's transform")
+                         "the image-bump gate must displace the sticker layer's transform")
   }
 
   /// Part 2d: all three gates and both waveforms coexist in ONE frame — the single fact
@@ -380,7 +380,7 @@ final class EngineWiringTests: XCTestCase {
         engine.sticker.layer.enabled = true
         engine.waveforms.wave1Enabled = true
         engine.waveforms.wave2Enabled = true
-        engine.bumpsEnabled = (world: gates, wave: gates, kitty: gates)
+        engine.bumpsEnabled = (world: gates, wave: gates, image: gates)
       }, perFrame: { engine, _ in
         engine.bands.ingest(burst)
       })

@@ -17,7 +17,7 @@ public enum ToggleEvent: Equatable, Codable {
   case sInvert(Bool)
   case worldBumpEnabled(Bool)
   case waveBumpEnabled(Bool)
-  case kittyBumpEnabled(Bool)
+  case imageBumpEnabled(Bool)
   case wave1Enabled(Bool)
   case wave2Enabled(Bool)
   case layerEnabled(Bool)
@@ -95,7 +95,7 @@ public struct ControlStateSnapshot {
   public var sInvert: () -> Bool
   public var worldBumpEnabled: () -> Bool
   public var waveBumpEnabled: () -> Bool
-  public var kittyBumpEnabled: () -> Bool
+  public var imageBumpEnabled: () -> Bool
   public var wave1Enabled: () -> Bool
   public var wave2Enabled: () -> Bool
   public var layerEnabled: () -> Bool
@@ -105,14 +105,14 @@ public struct ControlStateSnapshot {
   public var rawValue: (ControlAxis) -> Float
 
   public init(sInvert: @escaping () -> Bool, worldBumpEnabled: @escaping () -> Bool,
-              waveBumpEnabled: @escaping () -> Bool, kittyBumpEnabled: @escaping () -> Bool,
+              waveBumpEnabled: @escaping () -> Bool, imageBumpEnabled: @escaping () -> Bool,
               wave1Enabled: @escaping () -> Bool, wave2Enabled: @escaping () -> Bool,
               layerEnabled: @escaping () -> Bool,
               rawValue: @escaping (ControlAxis) -> Float = { _ in 0 }) {
     self.sInvert = sInvert
     self.worldBumpEnabled = worldBumpEnabled
     self.waveBumpEnabled = waveBumpEnabled
-    self.kittyBumpEnabled = kittyBumpEnabled
+    self.imageBumpEnabled = imageBumpEnabled
     self.wave1Enabled = wave1Enabled
     self.wave2Enabled = wave2Enabled
     self.layerEnabled = layerEnabled
@@ -130,7 +130,7 @@ public struct ControlStateSnapshot {
     case .sInvert: return sInvert()
     case .worldBumpEnabled: return worldBumpEnabled()
     case .waveBumpEnabled: return waveBumpEnabled()
-    case .kittyBumpEnabled: return kittyBumpEnabled()
+    case .imageBumpEnabled: return imageBumpEnabled()
     case .wave1Enabled: return wave1Enabled()
     case .wave2Enabled: return wave2Enabled()
     case .layerEnabled: return layerEnabled()
@@ -148,7 +148,7 @@ public struct ControlStateSnapshot {
   public static func constant(_ value: Bool,
                               rawValue: @escaping (ControlAxis) -> Float = { _ in 0 }) -> ControlStateSnapshot {
     ControlStateSnapshot(sInvert: { value }, worldBumpEnabled: { value }, waveBumpEnabled: { value },
-                         kittyBumpEnabled: { value }, wave1Enabled: { value }, wave2Enabled: { value },
+                         imageBumpEnabled: { value }, wave1Enabled: { value }, wave2Enabled: { value },
                          layerEnabled: { value }, rawValue: rawValue)
   }
 }
@@ -161,7 +161,7 @@ extension ToggleEvent {
     case .sInvert: return "SInvert"
     case .worldBumpEnabled: return "World bump"
     case .waveBumpEnabled: return "Wave bump"
-    case .kittyBumpEnabled: return "Kitty bump"
+    case .imageBumpEnabled: return "Image bump"
     case .wave1Enabled: return "Wave 1"
     case .wave2Enabled: return "Wave 2"
     case .layerEnabled: return "Layer enable"

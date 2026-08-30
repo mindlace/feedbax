@@ -93,7 +93,7 @@ public struct OperatorPanel: View {
           // "kittieBump™" is the original's own on-screen label (spec §04 §1.3) — kept plain
           // here since the brief's "use the original's names" instruction names the 6 slider
           // labels specifically, not the toggle labels.
-          Toggle("Kitty Bump", isOn: Binding(get: { vm.kittyBumpOn }, set: { vm.setKittyBumpEnabled($0) }))
+          Toggle("Image Bump", isOn: Binding(get: { vm.imageBumpOn }, set: { vm.setImageBumpEnabled($0) }))
         }
         Section("Display") {
           Toggle("Show HUD", isOn: $vm.hudEnabled)

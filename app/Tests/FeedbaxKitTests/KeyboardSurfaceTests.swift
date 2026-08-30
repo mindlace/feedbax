@@ -31,7 +31,7 @@ final class KeyboardSurfaceTests: XCTestCase {
     var sInvertTruth = false
     let snapshot = ControlStateSnapshot(
       sInvert: { sInvertTruth }, worldBumpEnabled: { false }, waveBumpEnabled: { false },
-      kittyBumpEnabled: { false }, wave1Enabled: { false }, wave2Enabled: { false },
+      imageBumpEnabled: { false }, wave1Enabled: { false }, wave2Enabled: { false },
       layerEnabled: { false })
     let s = KeyboardTrackpadSurface(bindings: try BindingsLoader.load(from: nil), stateSnapshot: snapshot)
     s.keyDown("i")

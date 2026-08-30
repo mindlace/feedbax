@@ -47,7 +47,7 @@ public final class Engine {
   /// The webUI receiver half of the kittybump modulator (spec §04 §1.3) — `AudioBands`
   /// produces the raw, unrectified per-frame mean; this is the `abs` + `slide 22/14` that
   /// turns it into the offset actually applied to the sticker transform (step 3 of `step`).
-  private let kittyReceiver = KittyBumpReceiver()
+  private let imageBumpReceiver = ImageBumpReceiver()
 
   /// Per-layer filter chains (design §5's `TextureFilter`/`FilterChain`) — owned here, not on
   /// `SeedSource`, because no source implementation exposes one yet (`Presets.swift`'s note on
@@ -65,7 +65,7 @@ public final class Engine {
   /// All three audio-follower gates, default OFF (spec §03 §7/§10 — "Bump enables: all three
   /// default OFF"). Kept as one grouped tuple, not three separate properties, because they're
   /// always read/written together (preset capture/recall, the toggle handler below).
-  public var bumpsEnabled: (world: Bool, wave: Bool, kitty: Bool) = (false, false, false)
+  public var bumpsEnabled: (world: Bool, wave: Bool, image: Bool) = (false, false, false)
 
   /// Render tick rate — `FrameClock` (the display-link wrapper) reads this to pin its
   /// `preferredFrameRateRange`. Any of `frameRatePresets` in normal operation; not validated
@@ -224,15 +224,13 @@ public final class Engine {
     sticker.transform = router.layerTransform
     movie.transform = router.layerTransform
 
-    // 3. Kitty offset: an ADDITIVE, non-persistent modulator contribution on top of the
-    // sticker layer's manual transform (design §5's Modulator rule; spec §04 §1.3) — it
-    // never becomes the new manual value, so it must not accumulate frame over frame. The
-    // transform is mutated only for the duration of this frame's draw and restored below,
-    // rather than threading a separate "effective transform" through the compositor (which
-    // reads `SeedSource.transform` directly and has no such parameter).
+    // 3. Image bump ("kittieBump™" in the original — spec §04 §1.3, bus `kittybump`): an
+    // ADDITIVE, non-persistent modulator contribution on top of the sticker layer's manual
+    // transform (design §5's Modulator rule). It never becomes the new manual value, so it
+    // must not accumulate frame over frame.
     let baseStickerTransform = sticker.transform
-    if bumpsEnabled.kitty {
-      let offset = kittyReceiver.process(audio.kittyBumpRaw)
+    if bumpsEnabled.image {
+      let offset = imageBumpReceiver.process(audio.imageBumpRaw)
       sticker.transform.scale.x += offset
       sticker.transform.scale.y += offset
       sticker.transform.position.y += offset
@@ -324,7 +322,7 @@ public final class Engine {
     switch event {
     case .worldBumpEnabled(let on): bumpsEnabled.world = on
     case .waveBumpEnabled(let on): bumpsEnabled.wave = on
-    case .kittyBumpEnabled(let on): bumpsEnabled.kitty = on
+    case .imageBumpEnabled(let on): bumpsEnabled.image = on
     case .wave1Enabled(let on): waveforms.wave1Enabled = on
     case .wave2Enabled(let on): waveforms.wave2Enabled = on
     case .layerEnabled(let on):
@@ -374,7 +372,7 @@ public final class Engine {
     var preset = PresetStore.capture(name: name, router: router, layers: [sticker, movie])
     preset.toggles.worldBump = bumpsEnabled.world
     preset.toggles.waveBump = bumpsEnabled.wave
-    preset.toggles.kittyBump = bumpsEnabled.kitty
+    preset.toggles.kittyBump = bumpsEnabled.image
     preset.toggles.wave1 = waveforms.wave1Enabled
     preset.toggles.wave2 = waveforms.wave2Enabled
     // Sticker/movie `.enabled` are kept in lockstep by `handle(.layerEnabled:)` above, so
@@ -402,7 +400,7 @@ public final class Engine {
     PresetStore.apply(preset, router: router, layers: [sticker, movie], at: time)
     layerMode = LayerMode.fromPresetIdentifier(preset.layerMode)
     bumpsEnabled = (world: preset.toggles.worldBump, wave: preset.toggles.waveBump,
-                    kitty: preset.toggles.kittyBump)
+                    image: preset.toggles.kittyBump)
     waveforms.wave1Enabled = preset.toggles.wave1
     waveforms.wave2Enabled = preset.toggles.wave2
     sticker.layer.enabled = preset.toggles.layerEnabled

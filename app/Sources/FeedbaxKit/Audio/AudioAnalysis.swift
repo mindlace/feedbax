@@ -4,7 +4,7 @@ import Foundation
 /// One render frame's worth of audio analysis (spec §03 §9's per-frame pseudocode) — sampled
 /// once per the `ctrlbang`/`audiobang` cadence, not once per audio sample. Task 18 draws
 /// `wave1Points`/`wave2Points`/consumes `waveBumpRaw`; Task 19 wires `worldBump` into
-/// `RenderParams` and routes `kittyBumpRaw` through `KittyBumpReceiver` into sticker
+/// `RenderParams` and routes `imageBumpRaw` through `ImageBumpReceiver` into sticker
 /// transforms. All three "bump" enables default OFF in the original (spec §03 §10) — that
 /// gating is engine-side (Task 19); the DSP here always runs regardless.
 public struct FrameAudio {
@@ -16,8 +16,8 @@ public struct FrameAudio {
   /// sits near zero for a steady tone.
   public var waveBumpRaw: Float
   /// 46.7 Hz band → mean since last frame, unscaled (spec §03 §7c). Rectify + slew happen
-  /// receiver-side (`KittyBumpReceiver`, spec §04 §1.3), not here.
-  public var kittyBumpRaw: Float
+  /// receiver-side (`ImageBumpReceiver`, spec §04 §1.3), not here.
+  public var imageBumpRaw: Float
   /// Wave-1 ring (1024 samples) downsampled ×2 → 512 points, each run through its own
   /// persistent `SlideEnvelope(up: 8, down: 3)` cell — `jit.slide`'s per-cell smoothing
   /// (spec §03 §4).
@@ -65,8 +65,8 @@ public final class AudioBands {
   // sum+count reset every `frameValues()` call, exactly like `avg~` reset by its trigger bang.
   private var waveBumpSum: Float = 0
   private var waveBumpCount: Int = 0
-  private var kittyBumpSum: Float = 0
-  private var kittyBumpCount: Int = 0
+  private var imageBumpSum: Float = 0
+  private var imageBumpCount: Int = 0
 
   /// RMS of the most recent `ingest` batch (~23 ms at a 1024-sample tap) — the HUD's input
   /// meter. The app has no other way to tell "no audio arrives" from "the ring is static".
@@ -136,8 +136,8 @@ public final class AudioBands {
       wave1Ring.push(wave1Sample)
       waveBumpSum += wave1Sample * 2.2
       waveBumpCount += 1
-      kittyBumpSum += wave1Sample
-      kittyBumpCount += 1
+      imageBumpSum += wave1Sample
+      imageBumpCount += 1
 
       // Wave-2 (spec §03 §3, §9): input pre-scaled by wave2InputGain before its own biquad.
       let wave2Sample = wave2Biquad.process(s * wave2InputGain)
@@ -154,11 +154,11 @@ public final class AudioBands {
     let worldBump = worldBumpSnapshot * 0.05
 
     let waveBumpRaw = waveBumpCount > 0 ? waveBumpSum / Float(waveBumpCount) : 0
-    let kittyBumpRaw = kittyBumpCount > 0 ? kittyBumpSum / Float(kittyBumpCount) : 0
+    let imageBumpRaw = imageBumpCount > 0 ? imageBumpSum / Float(imageBumpCount) : 0
     waveBumpSum = 0
     waveBumpCount = 0
-    kittyBumpSum = 0
-    kittyBumpCount = 0
+    imageBumpSum = 0
+    imageBumpCount = 0
 
     let wave1Raw = wave1Ring.strideDecimated(by: Self.wave1Downsample)
     var wave1Points = [Float](repeating: 0, count: wave1Raw.count)
@@ -167,17 +167,17 @@ public final class AudioBands {
     }
     let wave2Points = wave2Ring.points()
 
-    return FrameAudio(worldBump: worldBump, waveBumpRaw: waveBumpRaw, kittyBumpRaw: kittyBumpRaw,
+    return FrameAudio(worldBump: worldBump, waveBumpRaw: waveBumpRaw, imageBumpRaw: imageBumpRaw,
                        wave1Points: wave1Points, wave2Points: wave2Points)
   }
 }
 
 /// The webUI-side receiver for `kittybumpsignal` (spec §04 §1.3): `abs()` then a
 /// **control-rate** `slide 22 14` — Max's non-tilde `slide`, stepped once per received value
-/// (i.e. once per frame, since `kittyBumpRaw` arrives once per frame), not per audio sample
-/// like `slide~`. Rectify-then-slew happens entirely here, not in `AudioBands` — `kittyBumpRaw`
+/// (i.e. once per frame, since `imageBumpRaw` arrives once per frame), not per audio sample
+/// like `slide~`. Rectify-then-slew happens entirely here, not in `AudioBands` — `imageBumpRaw`
 /// itself is unrectified (spec §03 §7c).
-public final class KittyBumpReceiver {
+public final class ImageBumpReceiver {
   private var slide = SlideEnvelope(up: 22, down: 14)
 
   public init() {}

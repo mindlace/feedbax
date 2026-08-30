@@ -12,7 +12,7 @@ extension ToggleEvent {
     case "sInvert": return .sInvert(flip)
     case "worldBumpEnabled": return .worldBumpEnabled(flip)
     case "waveBumpEnabled": return .waveBumpEnabled(flip)
-    case "kittyBumpEnabled": return .kittyBumpEnabled(flip)
+    case "kittyBumpEnabled": return .imageBumpEnabled(flip)
     case "wave1Enabled": return .wave1Enabled(flip)
     case "wave2Enabled": return .wave2Enabled(flip)
     case "layerEnabled": return .layerEnabled(flip)
@@ -27,7 +27,9 @@ extension ToggleEvent {
     case .sInvert: return "sInvert"
     case .worldBumpEnabled: return "worldBumpEnabled"
     case .waveBumpEnabled: return "waveBumpEnabled"
-    case .kittyBumpEnabled: return "kittyBumpEnabled"
+    // Wire name deliberately NOT renamed with the Swift case (2026-08-29 design doc §4): an
+    // unknown marker is a hard startup throw, and this change ships no migration.
+    case .imageBumpEnabled: return "kittyBumpEnabled"
     case .wave1Enabled: return "wave1Enabled"
     case .wave2Enabled: return "wave2Enabled"
     case .layerEnabled: return "layerEnabled"
@@ -47,7 +49,7 @@ extension ToggleEvent {
     case .sInvert: return .sInvert(flip)
     case .worldBumpEnabled: return .worldBumpEnabled(flip)
     case .waveBumpEnabled: return .waveBumpEnabled(flip)
-    case .kittyBumpEnabled: return .kittyBumpEnabled(flip)
+    case .imageBumpEnabled: return .imageBumpEnabled(flip)
     case .wave1Enabled: return .wave1Enabled(flip)
     case .wave2Enabled: return .wave2Enabled(flip)
     case .layerEnabled: return .layerEnabled(flip)

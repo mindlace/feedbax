@@ -70,6 +70,8 @@ public struct PresetToggles: Codable, Equatable {
   public var sInvert = false
   public var worldBump = false
   public var waveBump = false
+  /// Wire name frozen — see the `Bindings.marker` comment and 2026-08-29 design doc §4. The
+  /// Swift-side concept is "image bump"; this field name is what saved presets contain.
   public var kittyBump = false
   public var wave1 = true
   public var wave2 = true
@@ -94,7 +96,7 @@ public struct PresetToggles: Codable, Equatable {
   /// held.
   func toggleEvents() -> [ToggleEvent] {
     [.sInvert(sInvert), .worldBumpEnabled(worldBump), .waveBumpEnabled(waveBump),
-     .kittyBumpEnabled(kittyBump), .wave1Enabled(wave1), .wave2Enabled(wave2),
+     .imageBumpEnabled(kittyBump), .wave1Enabled(wave1), .wave2Enabled(wave2),
      .layerEnabled(layerEnabled)]
   }
 }
