@@ -118,7 +118,128 @@ final class StickerSourceTests: XCTestCase {
     XCTAssertFalse(secondTex === firstTex, "rescan must force a fresh decode, not trust the dedupe cache")
   }
 
+  // MARK: - Import (the drop zone / "Add Images…" path — how the folder gets fed)
+
+  func testImportCopiesIntoFolderAndSelectsTheNewImage() throws {
+    let src = StickerSource(context: try MetalContext(), folder: folder)
+    let inbox = try makeInbox()
+    try writePNG(inbox.appendingPathComponent("d-white.png"), rgba: [1, 1, 1, 1])
+
+    let result = src.importImages(from: [inbox.appendingPathComponent("d-white.png")])
+
+    XCTAssertEqual(result.imported, ["d-white.png"])
+    XCTAssertTrue(result.skipped.isEmpty)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("d-white.png").path),
+                  "import COPIES into the sticker folder; it does not reference in place")
+    XCTAssertEqual(src.itemCount, 4)
+    XCTAssertEqual(src.items[src.selectedIndex].lastPathComponent, "d-white.png",
+                   "a freshly imported image is selected, so a drop is immediately visible on the output")
+  }
+
+  func testImportSkipsNonImages() throws {
+    let src = StickerSource(context: try MetalContext(), folder: folder)
+    let inbox = try makeInbox()
+    let doc = inbox.appendingPathComponent("readme.txt")
+    try "nope".write(to: doc, atomically: true, encoding: .utf8)
+
+    let result = src.importImages(from: [doc])
+
+    XCTAssertEqual(result.imported, [])
+    XCTAssertEqual(result.skipped, ["readme.txt"])
+    XCTAssertEqual(src.itemCount, 3, "count unchanged")
+  }
+
+  func testImportDoesNotOverwriteAnExistingName() throws {
+    let ctx = try MetalContext()
+    let src = StickerSource(context: ctx, folder: folder)
+    let inbox = try makeInbox()
+    // Same NAME as a resident sticker, different pixels: the resident red must survive intact.
+    try writePNG(inbox.appendingPathComponent("a-red.png"), rgba: [0, 1, 0, 1])
+
+    let result = src.importImages(from: [inbox.appendingPathComponent("a-red.png")])
+
+    XCTAssertEqual(result.imported, ["a-red-2.png"], "colliding names are suffixed, not clobbered")
+    XCTAssertEqual(src.itemCount, 4)
+    src.selectedIndex = try XCTUnwrap(src.itemNames.firstIndex(of: "a-red.png"))
+    XCTAssertEqual(ctx.readPixels(try XCTUnwrap(src.tick(makeFrame(ctx))))[0].x, 1,
+                   accuracy: 2.0 / 255, "the original a-red.png is still red")
+  }
+
+  func testImportOfADirectoryTakesTheImagesInside() throws {
+    let src = StickerSource(context: try MetalContext(), folder: folder)
+    let inbox = try makeInbox()
+    try writePNG(inbox.appendingPathComponent("e-one.png"), rgba: [1, 1, 0, 1])
+    try writePNG(inbox.appendingPathComponent("f-two.png"), rgba: [0, 1, 1, 1])
+    try "nope".write(to: inbox.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+
+    let result = src.importImages(from: [inbox])
+
+    XCTAssertEqual(result.imported, ["e-one.png", "f-two.png"],
+                   "dropping a folder imports the images in it (spec §02 §9's never-wired dropfile, wired)")
+    XCTAssertEqual(src.itemCount, 5)
+  }
+
+  func testImportOfAFileAlreadyInTheFolderSelectsItWithoutCopying() throws {
+    let src = StickerSource(context: try MetalContext(), folder: folder)
+
+    let result = src.importImages(from: [folder.appendingPathComponent("c-blue.png")])
+
+    XCTAssertEqual(result.imported, ["c-blue.png"])
+    XCTAssertEqual(src.itemCount, 3, "re-dropping a resident file must not spawn c-blue-2.png")
+    XCTAssertEqual(src.items[src.selectedIndex].lastPathComponent, "c-blue.png")
+  }
+
+  func testImportFiresOnCountChanged() throws {
+    let src = StickerSource(context: try MetalContext(), folder: folder)
+    var seen: Int?
+    src.onCountChanged = { seen = $0 }
+    let inbox = try makeInbox()
+    try writePNG(inbox.appendingPathComponent("d-white.png"), rgba: [1, 1, 1, 1])
+
+    src.importImages(from: [inbox.appendingPathComponent("d-white.png")])
+
+    XCTAssertEqual(seen, 4, "the panel's count mirror refreshes on import, over the same bus as rescan")
+  }
+
+  func testImportIntoAMissingFolderCreatesIt() throws {
+    let ghost = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let src = StickerSource(context: try MetalContext(), folder: ghost)
+    XCTAssertEqual(src.itemCount, 0)
+    let inbox = try makeInbox()
+    try writePNG(inbox.appendingPathComponent("d-white.png"), rgba: [1, 1, 1, 1])
+
+    let result = src.importImages(from: [inbox.appendingPathComponent("d-white.png")])
+
+    XCTAssertEqual(result.imported, ["d-white.png"])
+    XCTAssertEqual(src.itemCount, 1, "the fallback sticker folder may not exist until the first drop")
+  }
+
+  func testImportOfNothingUsableLeavesSelectionAlone() throws {
+    let src = StickerSource(context: try MetalContext(), folder: folder)
+    src.selectedIndex = 2
+    let inbox = try makeInbox()
+    let doc = inbox.appendingPathComponent("readme.txt")
+    try "nope".write(to: doc, atomically: true, encoding: .utf8)
+
+    src.importImages(from: [doc])
+
+    XCTAssertEqual(src.selectedIndex, 2, "a rejected drop must not yank the performer back to index 0")
+  }
+
+  func testItemNamesMirrorItems() throws {
+    let src = StickerSource(context: try MetalContext(), folder: folder)
+    XCTAssertEqual(src.itemNames, ["a-red.png", "b-green.png", "c-blue.png"])
+  }
+
   // MARK: - Helpers
+
+  /// A separate directory standing in for wherever a dropped file comes FROM (the Finder,
+  /// another project folder) — deliberately never the sticker folder itself.
+  func makeInbox() throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+  }
 
   /// Writes a solid-color `width`×`height` PNG with STRAIGHT (non-premultiplied) alpha —
   /// the PNG spec's own convention, and the thing `StickerSource`'s decode is meant to
