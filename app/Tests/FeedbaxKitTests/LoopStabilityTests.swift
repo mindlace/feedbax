@@ -17,11 +17,17 @@ import simd
 /// not flat); (2) once injection is removed, the seeded loop relaxes under any geometry/hue/
 /// erase the fuzz throws at it — retention stays <= 1 under real (non-identity) transport;
 /// (3) with identity geometry and no injection at all, retention never exceeds unity across
-/// the full erase range. Deliberately NOT asserted anywhere here: "never clips while a seed
-/// is permanently drawn" — by the loop's own equations (`rgb' = warped_prev + A_dst*seed`,
-/// then clamp at 1.0) a permanently-drawn opaque seed saturates its own pixels even in the
-/// original Max instrument, so that clipping is the instrument's bounded nonlinearity, not a
-/// defect, and is not a property a correctly-built loop should have to satisfy.
+/// the full erase range; (4) a permanently drawn sticker is a *stamp*, not an injection —
+/// the loop never clips while it is on.
+///
+/// Property (4) used to be deliberately un-asserted, on the reasoning that the loop's
+/// equations (`rgb' = warped_prev + A_dst*seed`, then clamp) saturate a permanent seed in
+/// the original instrument too. That reasoning was wrong: it modelled the seed *under* the
+/// additive past-plane composite, which is where the Max retrofit had mistakenly put it. In
+/// Sean's patch the sticker `jit.gl.layer` draws on the render bang, *after* the plane,
+/// alpha-blended on top — `rgb' = As*S + (1-As)*warped_prev`, a convex combination that can
+/// never exceed the sticker's own brightness (spec §02 header; diagnosis finding J). Only the
+/// waveform graphs sit under the plane and inject additively.
 final class LoopStabilityTests: XCTestCase {
   private static let canvasSize = SIMD2<Int>(192, 108)
 
@@ -61,12 +67,18 @@ final class LoopStabilityTests: XCTestCase {
   /// relaxing once injection stops: what remains is retention, transport and the HSL drift,
   /// nothing else. A fresh engine would lose the accumulator state from the seeded phase.
   private func runSeeded(preset: Preset, frames: Int, seedOn: Bool,
+                        waveformsOn: Bool = true,
                         seedOffAtFrame: Int? = nil) throws -> [FrameLuminance] {
     let context = try MetalContext()
     let engine = try Engine(context: context)
     engine.setResolution(Self.canvasSize)
     engine.applyPreset(preset, at: -1)
     engine.sticker.layer.enabled = seedOn
+    if !waveformsOn {
+      // Same post-`applyPreset` ordering as `seedOn`: the preset re-asserts both wave toggles.
+      engine.waveforms.wave1Enabled = false
+      engine.waveforms.wave2Enabled = false
+    }
 
     var stats: [FrameLuminance] = []
     stats.reserveCapacity(frames)
@@ -273,9 +285,9 @@ final class LoopStabilityTests: XCTestCase {
         let cb = context.queue.makeCommandBuffer()!
         let frame = FrameContext(index: index, time: Double(index) / 60, delta: 1.0 / 60,
                                  canvasSize: Self.canvasSize, commandBuffer: cb, pool: context.pool)
-        let out = core.renderFrame(frame, params: params) { enc in
+        let out = core.renderFrame(frame, params: params, under: { enc in
           if seed { core.drawSolid(enc, color: SIMD4(0.5, 0.5, 0.5, 1)) }
-        }
+        })
         cb.commit(); cb.waitUntilCompleted(); context.pool.endFrame()
         return FrameLuminance(pixels: context.readPixels(out))
       }
@@ -311,6 +323,47 @@ final class LoopStabilityTests: XCTestCase {
         "erase=\($0.erase): first rose at frame \($0.frame) (\($0.from) -> \($0.to))"
       }.joined(separator: "; ")
       XCTFail("mean luminance rose by more than 1/255 frame-over-frame for: \(message)")
+    }
+  }
+
+  // MARK: - Test 4: a permanently drawn sticker is a stamp, not an injection
+
+  /// The sticker layer on, both waveforms off, the real `rota-spiral` configuration
+  /// (zoom 0.9, theta 0.2, erase 0.55) that `GoldenFrameTests`' header measured going 100 %
+  /// clipped white by frame 10 — through the real `Engine`, with the committed glyph fixture
+  /// as the sticker. With the sticker drawn *over* the feedback plane (the original's order)
+  /// the per-pixel map at a sticker pixel is `As*S + (1-As)*warped_prev`, and everywhere else
+  /// it is the transported, HSL-decayed past — nothing in that map can manufacture a value
+  /// brighter than the sticker itself, and the glyph's brightest channel is 242/255. So over
+  /// a 240-frame run: no clipped-white pixel ever, and at least one 8-bit step of headroom on
+  /// the brightest pixel of every frame. Waveforms are off because they *are* additive
+  /// injections (drawn under the plane, as in the original) and would muddy a test whose
+  /// single subject is the sticker's side of the plane.
+  func testPermanentStickerStampsOverTheLoopAndNeverClips() throws {
+    let preset = Scenarios.preset(name: "sticker-stamp", zoom: 0.9, theta: 0.2, erase: 0.55,
+                                  layerMode: .sticker, layerEnabled: true)
+    let series = try runSeeded(preset: preset, frames: 240, seedOn: true, waveformsOn: false)
+
+    print("frame  mean    maxLum  whiteFrac  variance")
+    for i in 0..<min(12, series.count) { printRow(i, series[i]) }
+    var i = 20
+    while i < series.count { printRow(i, series[i]); i += 20 }
+
+    // Non-vacuity: the glyph must actually be on the canvas from frame 0.
+    XCTAssertGreaterThan(series[0].maxLum, 0.25,
+      "frame 0 maxLum \(series[0].maxLum) — the sticker did not land, so the rest of this " +
+      "test would be vacuous")
+
+    if let clipFrame = firstClippingFrame(series) {
+      let s = series[clipFrame]
+      XCTFail("frame \(clipFrame): whiteFraction \(s.whiteFraction) is > 0 — a permanently " +
+        "drawn sticker clipped the loop to white (mean=\(s.mean), maxLum=\(s.maxLum)); the " +
+        "sticker is being added under the feedback plane instead of stamped over it")
+    }
+    if let overLum = series.firstIndex(where: { $0.maxLum > 1 - 1.0 / 255 }) {
+      let s = series[overLum]
+      XCTFail("frame \(overLum): maxLum \(s.maxLum) has less than one 8-bit step of headroom " +
+        "below full white (mean=\(s.mean), whiteFraction=\(s.whiteFraction))")
     }
   }
 }

@@ -62,7 +62,9 @@ final class StickerSourceTests: XCTestCase {
   }
 
   func testDefaultsMatchOriginalPicsvidLayer() throws {
-    // spec §02 §5 (zOrder), §04 §1.4 (enable-off at load), Constants (pic-size slider default).
+    // spec §02 §5 (zOrder — Sean's `@layer 2`; orders seed layers among themselves only, the
+    // plane is not in this order), §04 §1.4 (enable-off at load), Constants (pic-size slider
+    // default).
     let src = StickerSource(context: try MetalContext(), folder: folder)
     XCTAssertEqual(src.layer.zOrder, 2)
     XCTAssertFalse(src.layer.enabled)

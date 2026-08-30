@@ -6,12 +6,14 @@ final class FeedbackCoreTests: XCTestCase {
   func makeCore(_ ctx: MetalContext, size: Int = 8) throws -> FeedbackCore {
     try FeedbackCore(context: ctx, size: SIMD2(size, size))
   }
+  /// `under` seeds go in BEFORE the feedback plane (the additive side — a solid drawn here
+  /// is what the plane's (srcα, dstα) composite reads as its destination).
   func runFrame(_ ctx: MetalContext, _ core: FeedbackCore, _ params: RenderParams,
-                index: Int = 0, drawSeeds: @escaping (MTLRenderCommandEncoder) -> Void = { _ in }) -> [SIMD4<Float>] {
+                index: Int = 0, under: @escaping (MTLRenderCommandEncoder) -> Void = { _ in }) -> [SIMD4<Float>] {
     let cb = ctx.queue.makeCommandBuffer()!
     let frame = FrameContext(index: index, time: Double(index) / 60, delta: 1 / 60,
                              canvasSize: SIMD2(8, 8), commandBuffer: cb, pool: ctx.pool)
-    let out = core.renderFrame(frame, params: params, drawSeeds: drawSeeds)
+    let out = core.renderFrame(frame, params: params, under: under)
     cb.commit(); cb.waitUntilCompleted(); ctx.pool.endFrame()
     return ctx.readPixels(out)
   }

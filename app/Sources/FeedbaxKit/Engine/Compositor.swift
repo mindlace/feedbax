@@ -2,9 +2,11 @@ import Metal
 import simd
 
 /// Draws every enabled `SeedSource` layer's texture, z-ordered, into the accumulator —
-/// the "seeds under" step of `FeedbackCore.renderFrame` (Task 19 wires
-/// `collectTextures`/`drawSeeds` around that call). Owns the layer list; the individual
-/// sources (Tasks 15/16) own their own imagery.
+/// the `over` step of `FeedbackCore.renderFrame`, i.e. *after* the feedback plane, as a
+/// plain alpha-over stamp on top of the warped past (Task 19 wires `collectTextures`/
+/// `drawSeeds` around that call; see `renderFrame`'s recipe for why the side matters). Owns
+/// the layer list; the individual sources (Tasks 15/16) own their own imagery. `zOrder`
+/// orders these layers among themselves only — the plane is not part of it.
 ///
 /// **Why a 3D projection at all** (not a flat NDC placement): every placement constant in
 /// the spec is already in Jitter world units under Jitter's default camera — camera at

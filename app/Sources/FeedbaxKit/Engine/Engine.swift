@@ -253,15 +253,20 @@ public final class Engine {
       textures[activeSource.id] = activeFilters.apply(raw, frame)   // P1 default chains: empty
     }
 
-    // 5. `core.renderFrame` runs the erase/warp/composite recipe; `drawSeeds` draws the active
-    // layer (if any) under the warped past, and the waveform overlay draws in the same pass,
-    // sharing the one projection every world-space draw this frame uses.
+    // 5. `core.renderFrame` runs the erase/warp/composite recipe. The two injection sources
+    // land on opposite sides of the feedback plane, exactly as in the original's bang order
+    // (spec README frame clock): the waveforms draw `under` it — `audiobang` fired before the
+    // plane bang, so the plane's additive composite piles the warped past on top of them —
+    // and the active sticker/movie layer draws `over` it — Sean's `jit.gl.layer` drew on the
+    // render bang, after the plane, as a plain alpha-over stamp. Putting the layer under the
+    // plane is the whiteout: it is re-added every frame with nothing to lose it. Both share
+    // the one projection every world-space draw this frame uses.
     let canvasAspect = Float(resolution.x) / Float(resolution.y)
     let projection = Compositor.projection(canvasAspect: canvasAspect)
-    let result = core.renderFrame(frame, params: params) { enc in
-      compositor.drawSeeds(enc, frame: frame, textures: textures)
-      waveforms.draw(enc, frame: frame, audio: audio, projection: projection)
-    }
+    let result = core.renderFrame(
+      frame, params: params,
+      under: { enc in waveforms.draw(enc, frame: frame, audio: audio, projection: projection) },
+      over: { enc in compositor.drawSeeds(enc, frame: frame, textures: textures) })
 
     sticker.transform = baseStickerTransform   // undo step 3's temporary, additive-only offset
     return result

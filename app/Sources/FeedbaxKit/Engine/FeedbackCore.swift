@@ -177,18 +177,32 @@ public final class FeedbackCore {
     FeedbackCore.clear(context: context, texture: back, to: SIMD4(0, 0, 0, 1))
   }
 
-  /// The frame recipe (spec §01 §1 + design README; ordering is load-bearing):
+  /// The frame recipe (spec §01 §1 + spec README frame clock; ordering is load-bearing):
   /// 1. erase: hard-clear `back` to `(params.eraseColor, params.eraseAlpha)` — this
   ///    matches `jit.gl.node`'s FBO clear (docs/diagnosis-2026-08-23.md, "Trail-fade
   ///    parity"), not the old gl2 "translucent quad over the old frame" model. No residual
   ///    of `accumulator`'s previous contents survives; persistence comes entirely from the
   ///    warped feedback plane redrawn in step 4.
   /// 2. warp `accumulator` (last completed frame) → a freshly leased texture
-  /// 3. seeds under: caller draws into the freshly cleared `back` with normal blending
+  /// 3. `under`: material drawn into the freshly cleared `back` *before* the plane — the
+  ///    waveform graphs. The plane's (srcα, dstα) composite then **adds** the warped past on
+  ///    top of it, so anything drawn here is injected into the loop every frame.
   /// 4. past over: draw the warped texture as the feedback plane, (srcα, dstα) blend
-  /// 5. swap — `back` becomes the new `accumulator`, no copy
+  /// 5. `over`: material drawn *after* the plane — the sticker/movie layer, alpha-over. This
+  ///    is a convex stamp (`As·S + (1−As)·past`), bounded by the material's own brightness,
+  ///    which is what Sean's `jit.gl.layer` did: it drew on the render bang, after the
+  ///    manually banged plane (spec §02 header; diagnosis finding J). A sticker drawn in
+  ///    step 3 instead is re-added on every frame and clips to white within ten
+  ///    (`LoopStabilityTests.testPermanentStickerStampsOverTheLoopAndNeverClips`).
+  /// 6. swap — `back` becomes the new `accumulator`, no copy
+  ///
+  /// Both closures default to "draw nothing", so a caller names only the side it uses —
+  /// `renderFrame(frame, params: p, under: { … })`. They are labelled rather than trailing
+  /// on purpose: with two closure parameters, an unlabelled trailing closure binds by
+  /// position, and which side of the plane a draw lands on is the whole point.
   public func renderFrame(_ frame: FrameContext, params: RenderParams,
-                          drawSeeds: (MTLRenderCommandEncoder) -> Void) -> MTLTexture {
+                          under: (MTLRenderCommandEncoder) -> Void = { _ in },
+                          over: (MTLRenderCommandEncoder) -> Void = { _ in }) -> MTLTexture {
     let warped = warp.encode(frame, previous: accumulator, params: params.warpParams)  // 2 (reads accumulator before it's touched)
 
     let rp = MTLRenderPassDescriptor()
@@ -200,7 +214,7 @@ public final class FeedbackCore {
                                                        alpha: Double(params.eraseAlpha))
     rp.colorAttachments[0].storeAction = .store
     let enc = frame.commandBuffer.makeRenderCommandEncoder(descriptor: rp)!
-    drawSeeds(enc)                                                                     // 3
+    under(enc)                                                                         // 3
 
     if feedbackPlaneEnabled {
       // Apparent scale of the videoplane as worldBump pushes it toward the camera:
@@ -213,9 +227,10 @@ public final class FeedbackCore {
                         tint: SIMD4(1, 1, 1, 1),
                         blend: .srcAlphaDstAlpha)                                       // 4
     }
+    over(enc)                                                                          // 5
     enc.endEncoding()
 
-    swap(&accumulator, &back)                                                          // 5
+    swap(&accumulator, &back)                                                          // 6
     return accumulator
   }
 

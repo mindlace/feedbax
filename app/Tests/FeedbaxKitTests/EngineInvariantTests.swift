@@ -384,9 +384,9 @@ final class EngineInvariantTests: XCTestCase {
       let cb = context.queue.makeCommandBuffer()!
       let frame = FrameContext(index: index, time: Double(index) / 60, delta: 1.0 / 60,
                                canvasSize: SIMD2(64, 64), commandBuffer: cb, pool: context.pool)
-      let out = core.renderFrame(frame, params: params) { enc in
+      let out = core.renderFrame(frame, params: params, under: { enc in
         if seed { core.drawSolid(enc, color: SIMD4(0.5, 0.5, 0.5, 1)) }
-      }
+      })
       cb.commit(); cb.waitUntilCompleted(); context.pool.endFrame()
       return FrameLuminance(pixels: context.readPixels(out))
     }
