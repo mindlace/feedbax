@@ -40,9 +40,13 @@ public struct LayerTransform: Codable, Equatable {
 }
 
 /// Per-layer compositing settings — `jit.gl.layer`'s `@layer` (z-order) and enable state
-/// (spec §02 §5, §4). Default `zOrder = 2` matches the picsvid layer's own instantiation
-/// (`jit.gl.layer foo @layer 2 ...`, spec §02 §1); default `enabled = false` matches both
-/// its gating toggles' observed defaults (spec §02 §4/§7: "Enable camera" default off,
+/// (spec §02 §5, §4). `zOrder` orders seed layers among themselves only; the feedback plane
+/// is not in this order — every seed layer draws *over* it (`FeedbackCore.renderFrame`,
+/// step 5), the way Sean's layer drew after the manually banged plane. Default `zOrder = 2`
+/// is the value from Sean's own box (`jit.gl.layer foo @layer 2 ...`, spec §02 §1); the Max
+/// retrofit later had to raise it to 20 to get above its now-automatic plane, a concern this
+/// port expresses by recipe order instead of by number. Default `enabled = false` matches
+/// both its gating toggles' observed defaults (spec §02 §4/§7: "Enable camera" default off,
 /// `imageMove` enable default off) — nothing draws until something turns a layer on.
 ///
 /// Codable + Equatable: Task 12's presets serialize this directly.

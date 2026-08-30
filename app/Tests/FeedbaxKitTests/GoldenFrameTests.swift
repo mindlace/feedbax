@@ -232,7 +232,7 @@ enum Scenarios {
 /// These scenarios add one thing on top of that: an unplanned-visual-change alarm across the
 /// whole pipeline at once. That is genuinely useful, and it is all this is.
 ///
-/// ## BLOCKED — there are currently NO committed references, on purpose
+/// ## There are currently NO committed references — the cause is fixed, blessing is pending
 ///
 /// `GoldenReferences/` is empty and this test therefore fails, deliberately. When the three
 /// scenarios below were re-expressed on the real startup vector (dropping the `noDrift*`
@@ -241,7 +241,16 @@ enum Scenarios {
 /// reference; that is the bug reappearing, and the rule above ("look at the image and decide")
 /// says do not bless it.
 ///
-/// The saturation is NOT the HSL mapping this port fixed. Measured frame by frame on the
+/// **Resolved 2026-08-29.** The saturation was the sticker being drawn *under* the additive
+/// `(srcα, dstα)` past-plane composite, so it was re-added to the loop every frame. Sean's
+/// `jit.gl.layer` drew *after* the plane as an alpha-over stamp (spec §02 header; diagnosis
+/// finding J); `FeedbackCore.renderFrame` now has `under`/`over` slots and the seed layer
+/// goes `over`. `LoopStabilityTests.testPermanentStickerStampsOverTheLoopAndNeverClips`
+/// pins it on the `rota-spiral` configuration. The measurements below are kept as the
+/// record of what the bug looked like. References still need a human to open the rendered
+/// scenarios and judge them by eye before `FEEDBAX_REGEN_GOLDEN=1` blesses anything.
+///
+/// The saturation was NOT the HSL mapping this port fixed. Measured frame by frame on the
 /// `rota-spiral` configuration (192×108, sticker layer on, erase raw 0.55, zoom 0.9,
 /// theta 0.2), the whole canvas reaches meanLum ≈ 1.0 with 100% of pixels clipped white by
 /// **frame 10**, and it does so under every HSL setting tried:
@@ -261,9 +270,10 @@ enum Scenarios {
 /// past-plane composite and its interaction with the erase base's alpha), not in the control
 /// mapping.
 ///
-/// Until that is fixed there is nothing here worth pinning: a reference of a white square
+/// While that stood there was nothing here worth pinning: a reference of a white square
 /// detects no change that matters, and committing one would re-enact exactly the history
-/// described above. Regenerate — and re-read this section — once the loop stays bounded.
+/// described above. The loop now stays bounded with the sticker on; what remains is to look
+/// at the three renders and decide they are the look worth pinning.
 final class GoldenFrameTests: XCTestCase {
   static let scenarios: [Scenario] = [
     Scenarios.rotaSpiral, Scenarios.sinvertKaleidoscope, Scenarios.hslDrift,
@@ -336,10 +346,10 @@ final class GoldenFrameTests: XCTestCase {
         try GoldenRunner.writeReference(result, size: scenario.size, to: ref)
       } else if !FileManager.default.fileExists(atPath: ref.path) {
         let stats = Self.statistics(result)
-        failures.append(String(format: "%@: NO REFERENCE COMMITTED — deliberately absent, see this "
-                               + "file's header. This scenario currently renders as meanLum %.4f, "
-                               + "variance %.8f, clipped-white fraction %.4f; blessing is blocked "
-                               + "until the feedback loop stops saturating.",
+        failures.append(String(format: "%@: NO REFERENCE COMMITTED — see this file's header. "
+                               + "This scenario currently renders as meanLum %.4f, variance %.8f, "
+                               + "clipped-white fraction %.4f; open the render, judge it by eye, "
+                               + "then bless it with FEEDBAX_REGEN_GOLDEN=1.",
                                scenario.name, stats.mean, stats.variance, stats.white))
       } else {
         let verdict = try GoldenRunner.compare(result, referencePNG: ref)

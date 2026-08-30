@@ -5,6 +5,17 @@
 **Status:** four root causes fixed; the "seed layer saturates" finding is reframed
 as expected behaviour pending one like-for-like Max measurement
 
+> **Superseded 2026-08-29.** The like-for-like measurement was made (Max 9.1.5, Pluto
+> sticker, `docs/diagnosis-2026-08-23.md` finding J) and came out **bounded**: Sean's sticker
+> `jit.gl.layer` draws on the render bang, *after* the manually banged plane, as an alpha-over
+> stamp. The "Original" loop map below was derived from the Max *retrofit* patch, whose
+> `@layer 2` had put the sticker under the plane — the retrofit's own bug, not the original's
+> behaviour — so the "Reframed" section is wrong and the port's saturation with a permanent
+> sticker was a real defect. Fixed by drawing the seed layer after the plane
+> (`FeedbackCore.renderFrame`'s `over` slot; `LoopStabilityTests
+> .testPermanentStickerStampsOverTheLoopAndNeverClips`). Step 1 below is done; step 2
+> (golden scenario design) is unblocked.
+
 ## Method change — read this before doing anything else
 
 The previous pass chased stage hypotheses one at a time (alpha channel, draw
@@ -88,6 +99,9 @@ the HSL stage (`docs/diagnosis-2026-08-23.md`, "Trail-fade parity"), which is
 a true retention term and cannot exceed unity.
 
 ## Reframed — a permanently drawn opaque seed saturates in both systems
+
+> **Wrong — see the note at the top.** It saturates only when drawn *under* the plane; the
+> original stamps it *over*. Kept for the record.
 
 With the sticker permanently enabled, the port clips by frame 2–5 under every
 geometry and settles on a bright rail (startup geometry + theta 0.2: mean 0.965,

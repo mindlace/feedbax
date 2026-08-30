@@ -43,10 +43,10 @@ history and the party scenario.
 
 ## 2. What we're porting, in one breath
 
-A 60 Hz feedback loop: partially erase the accumulator, warp the previous frame
-(rotate/zoom/pan with mirror-fold edges, additive HSL shift), draw fresh seed material *under* it
-(stickers, movie frames, keyed camera, two audio waveforms), blend the warped past over the
-present with `(SRC_ALPHA, DST_ALPHA)`, capture, repeat. Seven live control slots ramped over
+A 60 Hz feedback loop: erase the accumulator, warp the previous frame (rotate/zoom/pan with
+mirror-fold edges, additive HSL shift), draw the two audio waveforms *under* it, blend the warped
+past over them with `(SRC_ALPHA, DST_ALPHA)`, then stamp the seed layer (sticker, movie frame,
+keyed camera) *over* the result with plain alpha-over, capture, repeat. Seven live control slots ramped over
 ~100 ms, plus an *unsmoothed* erase amount and a hard kaleidoscope sign-flip. That's the whole
 instrument;
 the character lives in about five exact constants and two shaders (spec README, "What makes the
@@ -155,10 +155,18 @@ Per tick, in this exact order (spec README; ordering is load-bearing):
 2. Warp the previous frame's texture: rota (inverse warp, pixel coordinates, anchor 0.5/0.5,
    mirror-fold bounds) → additive HSL. (v122 appended a brcosa output grade here; v1 omits it —
    see §6 decision 13.)
-3. Draw seed layers and waveforms *first*.
+3. Draw the waveforms *first* (under the plane — `audiobang` fires before the plane bang in
+   the original, so the plane's additive composite piles the past on top of them: they inject).
 4. Draw the warped previous frame *over* them as a full-screen quad with blend
    `(SRC_ALPHA, DST_ALPHA)` — not alpha-over.
-5. Present; the accumulator becomes next frame's "previous" by ping-pong swap.
+5. Draw the seed layer (sticker / movie / keyed camera) *over the plane* with plain alpha-over —
+   a convex stamp bounded by its own brightness. **[corrected 2026-08-29]** This step originally
+   read "seed layers *first*", i.e. under the plane, copied from the Max retrofit's `@layer 2`;
+   Sean's `jit.gl.layer` actually drew on the render bang, *after* the plane, and a seed under
+   the additive composite is re-added every frame and clips to white within ten frames — the
+   whiteout the golden references were blocked on (spec §02 header; diagnosis finding J;
+   `FeedbackCore.renderFrame`'s `under`/`over` slots).
+6. Present; the accumulator becomes next frame's "previous" by ping-pong swap.
 
 Where Max needed a fragile screen-capture step (the very thing that broke the repo on Max 9), a
 Metal port renders to texture natively — step 5 is a pointer swap, not a copy. Same math, zero
