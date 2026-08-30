@@ -29,14 +29,14 @@ struct StickerPicker: View {
 
   @State private var isTargeted = false
 
-  /// Small on purpose. A `Form` row on macOS only gets the trailing column, which in a
-  /// 600-pt-wide Controls window is ~140 pt — at 68 pt a tile the grid degenerates to one
-  /// image per row and scrolling it is no better than the stepper. 44 pt keeps two or three
-  /// per row at that width and simply fits more when the window is wider.
-  private static let tileSize: CGFloat = 44
-  /// ~3 rows of tiles — enough to read the set at a glance, short enough that Venue and
-  /// Presets stay on screen below.
-  private static let gridMaxHeight: CGFloat = 180
+  /// The image column is ~320pt wide now that the pads have their own band (2026-08-29 design
+  /// doc §5), so a `Form` row's control column fits roughly four 56pt tiles per row instead of
+  /// the two the old 44pt tiles managed at a 600pt window.
+  private static let tileSize: CGFloat = 56
+  /// ~3 rows. The cap is no longer about protecting Venue and Presets from being pushed off
+  /// the bottom of a 950pt column — it is about the grid not crowding the stepper and slider
+  /// directly beneath it.
+  private static let gridMaxHeight: CGFloat = 200
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
