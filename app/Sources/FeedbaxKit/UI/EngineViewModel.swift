@@ -267,12 +267,27 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     pendingToggles.append(.imageEnabled(true))
   }
 
+  /// The movie side's analogue of `showSelectedImage()` — called from `pickMovieFile` once a
+  /// movie has actually loaded. Deliberately a sibling rather than a shared method:
+  /// `showSelectedImage()`'s `itemCount > 0` guard is sticker-specific ("nothing to show" means
+  /// an empty sticker folder), and reusing it here would refuse to show a freshly loaded movie
+  /// in exactly the empty-sticker-folder case that finding 1 of the final review exists to fix.
+  /// A loaded movie is never "nothing to show", so this has no guard to mirror.
+  private func showLoadedMovie() {
+    imageShown = true
+    pendingToggles.append(.imageEnabled(true))
+  }
+
   /// `0...1` → index, via `StickerSource.select(normalized:)`'s own mapping (spec §02 §2 item
   /// 4) — the panel's continuous slider, as distinct from `setStickerIndex`'s discrete stepper.
+  /// Also shows the newly selected image (2026-08-29 design doc §3) for the same reason
+  /// `setStickerIndex` does: this and the stepper address the same selection index, and the
+  /// single "selecting is showing" rule has to hold no matter which control moved it.
   public func setStickerNormalized(_ value: Double) {
     guard let sticker = engine?.sticker else { return }
     sticker.select(normalized: Float(value))
     stickerIndex = sticker.selectedIndex
+    showSelectedImage()
   }
 
   // MARK: - Sticker library (the panel's thumbnail grid, drop zone, and "Add Images…")
@@ -393,8 +408,17 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     panel.canChooseDirectories = false
     panel.canChooseFiles = true
     guard panel.runModal() == .OK, let url = panel.url else { return }
+    applyChosenMovie(url)
+  }
+
+  /// Split out from `pickMovieFile` so the load-and-show behavior (final review, important
+  /// finding 1) is exercisable without driving a real `NSOpenPanel` — there is no headless way
+  /// to satisfy `runModal()`, but this piece has no AppKit dependency of its own. `internal`,
+  /// not `private`: `EngineViewModelTests` calls it directly via `@testable import`.
+  func applyChosenMovie(_ url: URL) {
     engine?.loadMovie(url: url)
     movieFileName = url.lastPathComponent
+    showLoadedMovie()
   }
 
   // MARK: - Resolution / frame rate (venue properties, not performed — `Preset` doc comment)

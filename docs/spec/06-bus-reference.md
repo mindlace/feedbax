@@ -33,10 +33,7 @@ it ramps linearly over `controlSmoothMs` milliseconds.
 | `imgbang` | bang, per frame | Frame-clock tick for the image layer: re-bangs `jit.grab`/`jit.ndi.receive~` when camera is on. | Feedbax → feedbax.picsvid | §02 |
 | `keyCh2init` | texture | Static backdrop colour texture all keyers matte against. | feedbax.picsvid → feedbax.picsvid | §02 §7.3 |
 | `keyCtrls` | 12 floats | Luma-high/low and chroma key parameters + key colour. | feedbax.picsvid → feedbax.picsvid | §02 §7.4 |
-| `kittybump` | 0/1 | Enables the 'kittieBump' kick-envelope in sound2. | feedbax.webui → feedbax.sound2 | §03 §7c, §04 §1.3 |
-
-The Swift port surfaces this bus as **image bump** (`ToggleEvent.imageBumpEnabled`, panel label "Image Bump") — the bus name and the Max patch are unchanged. See `docs/superpowers/specs/2026-08-29-image-layer-and-panel-layout-design.md` §4.
-
+| `kittybump` | 0/1 | Enables the 'kittieBump' kick-envelope in sound2. The Swift port surfaces this bus as **image bump** (`ToggleEvent.imageBumpEnabled`, panel label "Image Bump") — the bus name and the Max patch are unchanged. See `docs/superpowers/specs/2026-08-29-image-layer-and-panel-layout-design.md` §4. | feedbax.webui → feedbax.sound2 | §03 §7c, §04 §1.3 |
 | `kittybumpsignal` | float | Kick envelope back to webUI; adds to picture size/Y placement. | feedbax.sound2 → feedbax.webui | §04 §1.3 |
 | `leap2HandsActive` | 0/1 | Leap sees a hand (either); drives the 2-s Leap→iPad fallback timer. | feedbax.leapgemini → feedbax.shaderfx | §01 §4, §04 §3.3 |
 | `left_fingers` | list | Ultraleap left finger data, consumed only by `p fill_coll` (display). | feedbax.leapgemini → feedbax.leapgemini/fill_coll | §04 §3.4 |

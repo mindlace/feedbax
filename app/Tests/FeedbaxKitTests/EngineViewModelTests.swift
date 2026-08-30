@@ -255,4 +255,55 @@ final class EngineViewModelTests: XCTestCase {
     XCTAssertTrue(engine.isImageShown,
                   "dropping images into an empty folder must not leave the picker inert")
   }
+
+  /// Final review, important finding 2: the normalized slider (`setStickerNormalized`) is the
+  /// one selection path that used to skip `showSelectedImage()`, unlike `setStickerIndex`,
+  /// `importStickers`, and `selectSticker(named:)`. Same arbitration path as
+  /// `testPickingAnImageShowsIt` above, for the same reason.
+  func testDraggingTheNormalizedSliderShowsIt() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data([0]).write(to: folder.appendingPathComponent("a.png"))
+    try Data([0]).write(to: folder.appendingPathComponent("b.png"))
+    let engine = try Engine(context: try MetalContext(), stickerFolder: folder)
+    engine.hideImage()
+    let vm = EngineViewModel(engine: engine)
+    engine.router.surfaces = [vm]
+
+    vm.setStickerNormalized(1.0)
+    XCTAssertTrue(vm.imageShown, "the optimistic mirror updates immediately, before the tick")
+    XCTAssertFalse(engine.isImageShown, "but engine truth only moves once the router arbitrates")
+
+    _ = engine.router.tick(at: 0)
+
+    XCTAssertTrue(engine.isImageShown,
+                  "the normalized slider is the same selection index as the stepper — it must show too")
+    XCTAssertTrue(vm.imageShown)
+  }
+
+  /// Final review, important finding 1: with the Layer Enable checkbox gone, choosing a movie
+  /// from an empty (or `Off`-selected) sticker folder used to leave `layer.enabled` false —
+  /// black output recoverable only via the undiscoverable `p` key. `applyChosenMovie` is
+  /// `pickMovieFile`'s testable half (that method itself drives a real `NSOpenPanel`, which
+  /// has no headless equivalent). Same router-arbitration path as the sticker-side tests above.
+  func testChoosingAMovieFromAnEmptyStickerFolderShowsIt() throws {
+    let empty = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+    let engine = try Engine(context: try MetalContext(), stickerFolder: empty)
+    engine.applyColdStartImageDefaults()          // empty at launch, so nothing is shown
+    XCTAssertFalse(engine.isImageShown)
+    let vm = EngineViewModel(engine: engine)
+    engine.router.surfaces = [vm]
+    vm.setLayerMode(.movie)
+
+    vm.applyChosenMovie(Scenarios.sweepURL)
+    XCTAssertTrue(vm.imageShown, "the optimistic mirror updates immediately, before the tick")
+    XCTAssertFalse(engine.isImageShown, "but engine truth only moves once the router arbitrates")
+
+    _ = engine.router.tick(at: 0)
+
+    XCTAssertTrue(engine.isImageShown,
+                  "choosing a movie must show it even when the sticker folder is empty")
+    XCTAssertEqual(vm.movieFileName, Scenarios.sweepURL.lastPathComponent)
+  }
 }

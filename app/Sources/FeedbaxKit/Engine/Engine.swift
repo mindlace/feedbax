@@ -410,8 +410,10 @@ public final class Engine {
                     image: preset.toggles.kittyBump)
     waveforms.wave1Enabled = preset.toggles.wave1
     waveforms.wave2Enabled = preset.toggles.wave2
-    sticker.layer.enabled = preset.toggles.layerEnabled
-    movie.layer.enabled = preset.toggles.layerEnabled
+    // Routed through `handle` (finding 7 of the final review) rather than writing both layers'
+    // `.enabled` directly, so the sticker/movie lockstep invariant is enforced by the one place
+    // that owns it instead of being re-proven by inspection at every call site.
+    handle(.imageEnabled(preset.toggles.layerEnabled))
     for layer in preset.layers {
       switch (layer.id, layer.sourceSelection) {
       case (sticker.id, .stickerIndex(let index)):

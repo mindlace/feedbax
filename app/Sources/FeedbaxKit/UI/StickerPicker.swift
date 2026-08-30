@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The sticker half of the panel's "Layer Source" section: a drop zone that feeds the sticker
+/// The sticker half of the panel's "Image" section: a drop zone that feeds the sticker
 /// folder, and a thumbnail grid for picking among what's in it.
 ///
 /// This exists because flipping through images with only a stepper and a 0…1 slider means
@@ -11,11 +11,11 @@ import SwiftUI
 /// and a click here writes the same `selectedIndex` they do — no privileged path (design §5).
 ///
 /// The grid is collapsible and height-capped on purpose. The Controls window is already dense
-/// (Shader Control, Toggles, Display, Surfaces, Layer Source, Venue, Presets in two columns),
-/// so an uncapped grid of a folder with fifty stickers in it would push Venue and Presets off
-/// the bottom. Capped + internally scrolling + collapsible means a big folder costs a fixed
-/// amount of panel, and an operator who doesn't want the grid at all can fold it away and get
-/// the old compact layout back.
+/// (a full-width Surfaces band above a Feedback / Waveforms column and an Image / Venue &
+/// Presets column), so an uncapped grid of a folder with fifty stickers in it would push Venue
+/// & Presets off the bottom of the Image column. Capped + internally scrolling + collapsible
+/// means a big folder costs a fixed amount of panel, and an operator who doesn't want the grid
+/// at all can fold it away and get the old compact layout back.
 ///
 /// Like the rest of `OperatorPanel`, this view has no unit tests (there is no SwiftUI test rig
 /// in this package) — `EngineViewModel`/`StickerSource` carry the tested logic, and this is
@@ -33,8 +33,10 @@ struct StickerPicker: View {
   /// doc §5), so a `Form` row's control column fits roughly four 56pt tiles per row instead of
   /// the two the old 44pt tiles managed at a 600pt window.
   private static let tileSize: CGFloat = 56
-  /// ~3 rows. The cap is no longer about protecting Venue and Presets from being pushed off
-  /// the bottom of a 950pt column — it is about the grid not crowding the stepper and slider
+  /// ~3 rows. Venue & Presets still sits directly below Image in the same column, so the cap
+  /// still keeps a big folder from pushing it off the bottom — that hasn't changed. What's
+  /// different post-layout is just that there are two sections below the grid to protect
+  /// instead of three, and the cap is also about the grid not crowding the stepper and slider
   /// directly beneath it.
   private static let gridMaxHeight: CGFloat = 200
 
@@ -130,7 +132,7 @@ struct StickerPicker: View {
 
   private func tile(_ name: String) -> some View {
     let isSelected = vm.imageShown && name == vm.selectedStickerName
-    // No per-tile filename: at 44 pt a caption truncates to "cir…ng", which tells the operator
+    // No per-tile filename: at 56 pt a caption truncates to "cir…ng", which tells the operator
     // nothing. The name lives in the tooltip and in the selected-image line under the grid.
     return Button {
       vm.selectSticker(named: name)

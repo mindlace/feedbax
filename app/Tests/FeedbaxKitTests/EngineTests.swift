@@ -106,6 +106,38 @@ final class EngineTests: XCTestCase {
     XCTAssertEqual(e.sticker.selectedIndex, 1, "sticker source selection restored")
   }
 
+  /// Final review, minor finding 6: a preset saved with the image off must recall off, and one
+  /// saved showing must recall showing — the round trip `testPresetRoundTripsLayerModeBumpsAnd
+  /// SourceSelection` above never touched. `layerEnabled` is the frozen `PresetToggles` field
+  /// this asserts against (2026-08-29 design doc §3): "an image is showing when one is
+  /// selected; selecting `Off` … is how it stops" has to survive a save/recall round trip, not
+  /// just a live toggle.
+  func testPresetRoundTripsImageEnabledState() throws {
+    let e = try Engine(context: try MetalContext())
+
+    e.hideImage()
+    let offPreset = e.capturePreset(name: "off")
+    XCTAssertFalse(offPreset.toggles.layerEnabled, "capturePreset records image-off")
+
+    e.showImage()
+    XCTAssertTrue(e.isImageShown, "sanity: showImage actually shows before we recall over it")
+    e.applyPreset(offPreset, at: 0)
+    XCTAssertFalse(e.isImageShown, "recalling an off preset hides the image")
+    XCTAssertFalse(e.sticker.layer.enabled)
+    XCTAssertFalse(e.movie.layer.enabled, "lockstep: movie follows sticker on recall too")
+
+    e.showImage()
+    let onPreset = e.capturePreset(name: "on")
+    XCTAssertTrue(onPreset.toggles.layerEnabled, "capturePreset records image-on")
+
+    e.hideImage()
+    XCTAssertFalse(e.isImageShown, "sanity: hideImage actually hides before we recall over it")
+    e.applyPreset(onPreset, at: 0)
+    XCTAssertTrue(e.isImageShown, "recalling an on preset shows the image")
+    XCTAssertTrue(e.sticker.layer.enabled)
+    XCTAssertTrue(e.movie.layer.enabled, "lockstep: movie follows sticker on recall too")
+  }
+
   /// Final review, finding 1: `Engine.init`'s new `stickerFolder` parameter is what lets
   /// `AppBootstrap.start()` point the sticker source at a real, resolvable location instead of
   /// the CWD-relative default a Finder-launched `Feedbax.app` (CWD `/`) can never see. This pins

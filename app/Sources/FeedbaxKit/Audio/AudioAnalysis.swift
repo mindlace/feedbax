@@ -130,8 +130,9 @@ public final class AudioBands {
 
       // Wave-1's single biquad output fans out three ways, exactly as in the original
       // (spec §03 §3's table + §7b/§7c): the waveform-1 matrix, the wavebump accumulator
-      // (×2.2, unrectified), and the kittybump accumulator (×1, unrectified) all read the
-      // *same* filtered sample — not three independently-filtered copies.
+      // (×2.2, unrectified), and the `kittybump` accumulator (×1, unrectified — imageBumpSum/
+      // imageBumpCount below, the Swift port's name for the same bus) all read the *same*
+      // filtered sample — not three independently-filtered copies.
       let wave1Sample = wave1Biquad.process(s)
       wave1Ring.push(wave1Sample)
       waveBumpSum += wave1Sample * 2.2
@@ -146,8 +147,8 @@ public final class AudioBands {
   }
 
   /// Sampled once per render frame (spec §03 §7 "sampled once per frame", §9's ctrlbang/
-  /// audiobang cadence). Resets the wave/kitty since-last-frame accumulators — `avg~`'s
-  /// bang-triggered reset semantics.
+  /// audiobang cadence). Resets the wave/`kittybump` since-last-frame accumulators (waveBumpSum/
+  /// waveBumpCount and imageBumpSum/imageBumpCount) — `avg~`'s bang-triggered reset semantics.
   public func frameValues() -> FrameAudio {
     lock.lock()
     defer { lock.unlock() }
