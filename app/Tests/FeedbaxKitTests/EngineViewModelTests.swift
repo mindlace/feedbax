@@ -193,6 +193,11 @@ final class EngineViewModelTests: XCTestCase {
     try? FileManager.default.removeItem(at: dir)
   }
 
+  /// `.imageEnabled` is queue-only (like every other toggle setter), so this drives the real
+  /// arbitration path — `vm` registered as a router surface, `router.tick` polling it — rather
+  /// than asserting engine truth right off the queue. That's deliberate: it's the same path a
+  /// keyboard/gamepad `.imageEnabled` write takes, and it's what would catch a regression back
+  /// to a direct `engine?.showImage()` punch-through that bypasses last-write-wins arbitration.
   func testPickingAnImageShowsIt() throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -200,8 +205,13 @@ final class EngineViewModelTests: XCTestCase {
     let engine = try Engine(context: try MetalContext(), stickerFolder: folder)
     engine.hideImage()
     let vm = EngineViewModel(engine: engine)
+    engine.router.surfaces = [vm]
 
     vm.setStickerIndex(0)
+    XCTAssertTrue(vm.imageShown, "the optimistic mirror updates immediately, before the tick")
+    XCTAssertFalse(engine.isImageShown, "but engine truth only moves once the router arbitrates")
+
+    _ = engine.router.tick(at: 0)
 
     XCTAssertTrue(engine.isImageShown, "choosing an image is how you turn the layer on now")
     XCTAssertTrue(vm.imageShown)
@@ -221,6 +231,9 @@ final class EngineViewModelTests: XCTestCase {
     XCTAssertEqual(vm.stickerIndex, 0)
   }
 
+  /// Same reasoning as `testPickingAnImageShowsIt`: `.imageEnabled` only reaches `Engine`
+  /// through `router.tick`'s arbitration, so `vm` is registered as a router surface and ticked
+  /// before checking engine truth.
   func testImportingIntoAnEmptyFolderEndsWithTheImageShowing() throws {
     let empty = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
@@ -232,8 +245,12 @@ final class EngineViewModelTests: XCTestCase {
     engine.applyColdStartImageDefaults()          // empty at launch, so nothing is shown
     XCTAssertFalse(engine.isImageShown)
     let vm = EngineViewModel(engine: engine)
+    engine.router.surfaces = [vm]
 
     vm.importStickers([inbox.appendingPathComponent("dropped.png")])
+    XCTAssertTrue(vm.imageShown, "the optimistic mirror updates immediately, before the tick")
+
+    _ = engine.router.tick(at: 0)
 
     XCTAssertTrue(engine.isImageShown,
                   "dropping images into an empty folder must not leave the picker inert")

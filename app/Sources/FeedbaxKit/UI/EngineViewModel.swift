@@ -249,23 +249,21 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     showSelectedImage()
   }
 
-  /// The picker's `Off` tile, and the restore half of the `p` / gamepad-B gesture. Writes
-  /// `engine` directly, same as `setStickerIndex` above — `.imageEnabled` isn't consumed
-  /// specially by `ControlRouter` (unlike `.sInvert`), it's forwarded straight through to
-  /// `Engine.handle`, so there's no ramped/arbitrated state to wait a `poll()` cycle for. The
-  /// `pendingToggles` queue still gets the event too, so a router-level consumer (the
-  /// reference window's live-state read, another `ControlSurface` racing this one) still sees
-  /// it go through the normal toggle vocabulary next frame.
+  /// The picker's `Off` tile, and the restore half of the `p` / gamepad-B gesture. Queue-only
+  /// — exactly like `setSInvert`/`setWave1Enabled`/etc above: the mirror updates immediately
+  /// (optimistic UI), but the write to `Engine` goes through `pendingToggles` and
+  /// `ControlRouter`'s last-write-wins arbitration on the next `poll()`/`tick()`, same as
+  /// every other toggle and same as the keyboard/gamepad surfaces. A direct `engine?...` call
+  /// here would apply out of band from that arbitration and could stomp — or be stomped by —
+  /// a keyboard/gamepad `.imageEnabled` write landing in the same frame.
   public func hideImage() {
     imageShown = false
-    engine?.hideImage()
     pendingToggles.append(.imageEnabled(false))
   }
 
   public func showSelectedImage() {
     guard (engine?.sticker.itemCount ?? 0) > 0 else { return }   // nothing to show
     imageShown = true
-    engine?.showImage()
     pendingToggles.append(.imageEnabled(true))
   }
 
