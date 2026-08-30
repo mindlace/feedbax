@@ -128,45 +128,44 @@ final class EngineTests: XCTestCase {
   /// axes but no toggles). So a performer with a folder full of stickers got a panel that
   /// listed them, a picker that selected them, and an output that never showed one — the
   /// selection was working the whole time with nothing drawn to see it with.
-  func testColdStartEnablesTheImageLayerWhenTheFolderHasImages() throws {
+  func testColdStartShowsAnImageAndArmsTheBumpWhenTheFolderHasImages() throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     try Data([0]).write(to: folder.appendingPathComponent("a.png"))
 
     let e = try Engine(context: try MetalContext(), stickerFolder: folder)
-    XCTAssertFalse(e.sticker.layer.enabled, "still off as constructed — the flag's own default")
+    XCTAssertFalse(e.sticker.layer.enabled)
+    XCTAssertFalse(e.bumpsEnabled.image)
 
-    e.enableImageLayerIfStocked()
+    e.applyColdStartImageDefaults()
 
     XCTAssertTrue(e.sticker.layer.enabled, "a stocked folder means there is something to show")
-    XCTAssertTrue(e.movie.layer.enabled,
-                  "routed through handle(.layerEnabled:), so sticker/movie stay in lockstep")
+    XCTAssertTrue(e.movie.layer.enabled, "sticker/movie stay in lockstep")
+    XCTAssertTrue(e.bumpsEnabled.image, "the bump is armed with the image (design doc §4)")
   }
 
-  /// An empty folder has nothing to draw, so enabling would only assert a layer that renders
-  /// nothing — and would then be silently ON if the performer later pointed the instrument at
-  /// real images, which is not the state they'd expect to inherit.
-  func testColdStartLeavesTheImageLayerOffWhenTheFolderIsEmpty() throws {
+  func testColdStartDoesNothingWhenTheFolderIsEmpty() throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
     let e = try Engine(context: try MetalContext(), stickerFolder: folder)
-    e.enableImageLayerIfStocked()
+    e.applyColdStartImageDefaults()
 
     XCTAssertFalse(e.sticker.layer.enabled)
     XCTAssertFalse(e.movie.layer.enabled)
+    XCTAssertFalse(e.bumpsEnabled.image, "nothing to bump")
   }
 
-  /// Cold start only: it asserts ON, never OFF. A performer who turned the layer off before
-  /// this ran (or a preset that did) must not have that decision reverted.
-  func testColdStartEnableNeverTurnsTheLayerOff() throws {
+  func testColdStartNeverTurnsThingsOff() throws {
     let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 
     let e = try Engine(context: try MetalContext(), stickerFolder: folder)
     e.sticker.layer.enabled = true
-    e.enableImageLayerIfStocked()   // empty folder, but the layer is already on
+    e.bumpsEnabled.image = true
+    e.applyColdStartImageDefaults()   // empty folder, but both are already on
 
     XCTAssertTrue(e.sticker.layer.enabled, "an empty folder must not switch an enabled layer off")
+    XCTAssertTrue(e.bumpsEnabled.image)
   }
 }
