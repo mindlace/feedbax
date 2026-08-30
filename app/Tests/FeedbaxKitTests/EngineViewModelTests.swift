@@ -107,10 +107,10 @@ final class EngineViewModelTests: XCTestCase {
       sInvert: { engine.router.sInvert < 0 },
       worldBumpEnabled: { engine.bumpsEnabled.world },
       waveBumpEnabled: { engine.bumpsEnabled.wave },
-      kittyBumpEnabled: { engine.bumpsEnabled.kitty },
+      imageBumpEnabled: { engine.bumpsEnabled.image },
       wave1Enabled: { engine.waveforms.wave1Enabled },
       wave2Enabled: { engine.waveforms.wave2Enabled },
-      layerEnabled: { engine.sticker.layer.enabled })
+      imageEnabled: { engine.sticker.layer.enabled })
     let keyboard = KeyboardTrackpadSurface(bindings: try BindingsLoader.load(from: nil),
                                            stateSnapshot: keyboardSnapshot)
     keyboard.keyDown("i")
@@ -191,5 +191,119 @@ final class EngineViewModelTests: XCTestCase {
     XCTAssertEqual(vm.bindings.pads[1], PadAssignment(x: .slot(.panX), y: .slot(.zoom)))
     XCTAssertEqual(try BindingsStore(userFileURL: file).bindings.pads[1].y, .slot(.zoom), "written to disk")
     try? FileManager.default.removeItem(at: dir)
+  }
+
+  /// `.imageEnabled` is queue-only (like every other toggle setter), so this drives the real
+  /// arbitration path — `vm` registered as a router surface, `router.tick` polling it — rather
+  /// than asserting engine truth right off the queue. That's deliberate: it's the same path a
+  /// keyboard/gamepad `.imageEnabled` write takes, and it's what would catch a regression back
+  /// to a direct `engine?.showImage()` punch-through that bypasses last-write-wins arbitration.
+  func testPickingAnImageShowsIt() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data([0]).write(to: folder.appendingPathComponent("a.png"))
+    let engine = try Engine(context: try MetalContext(), stickerFolder: folder)
+    engine.hideImage()
+    let vm = EngineViewModel(engine: engine)
+    engine.router.surfaces = [vm]
+
+    vm.setStickerIndex(0)
+    XCTAssertTrue(vm.imageShown, "the optimistic mirror updates immediately, before the tick")
+    XCTAssertFalse(engine.isImageShown, "but engine truth only moves once the router arbitrates")
+
+    _ = engine.router.tick(at: 0)
+
+    XCTAssertTrue(engine.isImageShown, "choosing an image is how you turn the layer on now")
+    XCTAssertTrue(vm.imageShown)
+  }
+
+  func testHideImageLeavesTheSelectionAlone() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data([0]).write(to: folder.appendingPathComponent("a.png"))
+    let engine = try Engine(context: try MetalContext(), stickerFolder: folder)
+    let vm = EngineViewModel(engine: engine)
+    vm.setStickerIndex(0)
+
+    vm.hideImage()
+
+    XCTAssertFalse(vm.imageShown)
+    XCTAssertEqual(vm.stickerIndex, 0)
+  }
+
+  /// Same reasoning as `testPickingAnImageShowsIt`: `.imageEnabled` only reaches `Engine`
+  /// through `router.tick`'s arbitration, so `vm` is registered as a router surface and ticked
+  /// before checking engine truth.
+  func testImportingIntoAnEmptyFolderEndsWithTheImageShowing() throws {
+    let empty = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+    let inbox = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+    try Data([0]).write(to: inbox.appendingPathComponent("dropped.png"))
+
+    let engine = try Engine(context: try MetalContext(), stickerFolder: empty)
+    engine.applyColdStartImageDefaults()          // empty at launch, so nothing is shown
+    XCTAssertFalse(engine.isImageShown)
+    let vm = EngineViewModel(engine: engine)
+    engine.router.surfaces = [vm]
+
+    vm.importStickers([inbox.appendingPathComponent("dropped.png")])
+    XCTAssertTrue(vm.imageShown, "the optimistic mirror updates immediately, before the tick")
+
+    _ = engine.router.tick(at: 0)
+
+    XCTAssertTrue(engine.isImageShown,
+                  "dropping images into an empty folder must not leave the picker inert")
+  }
+
+  /// Final review, important finding 2: the normalized slider (`setStickerNormalized`) is the
+  /// one selection path that used to skip `showSelectedImage()`, unlike `setStickerIndex`,
+  /// `importStickers`, and `selectSticker(named:)`. Same arbitration path as
+  /// `testPickingAnImageShowsIt` above, for the same reason.
+  func testDraggingTheNormalizedSliderShowsIt() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data([0]).write(to: folder.appendingPathComponent("a.png"))
+    try Data([0]).write(to: folder.appendingPathComponent("b.png"))
+    let engine = try Engine(context: try MetalContext(), stickerFolder: folder)
+    engine.hideImage()
+    let vm = EngineViewModel(engine: engine)
+    engine.router.surfaces = [vm]
+
+    vm.setStickerNormalized(1.0)
+    XCTAssertTrue(vm.imageShown, "the optimistic mirror updates immediately, before the tick")
+    XCTAssertFalse(engine.isImageShown, "but engine truth only moves once the router arbitrates")
+
+    _ = engine.router.tick(at: 0)
+
+    XCTAssertTrue(engine.isImageShown,
+                  "the normalized slider is the same selection index as the stepper — it must show too")
+    XCTAssertTrue(vm.imageShown)
+  }
+
+  /// Final review, important finding 1: with the Layer Enable checkbox gone, choosing a movie
+  /// from an empty (or `Off`-selected) sticker folder used to leave `layer.enabled` false —
+  /// black output recoverable only via the undiscoverable `p` key. `applyChosenMovie` is
+  /// `pickMovieFile`'s testable half (that method itself drives a real `NSOpenPanel`, which
+  /// has no headless equivalent). Same router-arbitration path as the sticker-side tests above.
+  func testChoosingAMovieFromAnEmptyStickerFolderShowsIt() throws {
+    let empty = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+    let engine = try Engine(context: try MetalContext(), stickerFolder: empty)
+    engine.applyColdStartImageDefaults()          // empty at launch, so nothing is shown
+    XCTAssertFalse(engine.isImageShown)
+    let vm = EngineViewModel(engine: engine)
+    engine.router.surfaces = [vm]
+    vm.setLayerMode(.movie)
+
+    vm.applyChosenMovie(Scenarios.sweepURL)
+    XCTAssertTrue(vm.imageShown, "the optimistic mirror updates immediately, before the tick")
+    XCTAssertFalse(engine.isImageShown, "but engine truth only moves once the router arbitrates")
+
+    _ = engine.router.tick(at: 0)
+
+    XCTAssertTrue(engine.isImageShown,
+                  "choosing a movie must show it even when the sticker folder is empty")
+    XCTAssertEqual(vm.movieFileName, Scenarios.sweepURL.lastPathComponent)
   }
 }

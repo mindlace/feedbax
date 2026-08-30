@@ -52,7 +52,7 @@ The native macOS port lives in [`app/`](app/README.md) — that README covers bu
 
 Press `?` (or Help › Feedbax Controls, ⌘/) inside the app for the live reference — it is generated from the bindings table, so it is always current. Summary:
 
-**Keys:** `i` SInvert · `w` world bump · `a` wave bump · `k` kitty bump · `p` layer enable · `1`/`2` wave 1/2 · `f`/Esc fullscreen · `s` still capture · `[`/`]` erase −/+.
+**Keys:** `i` SInvert · `w` world bump · `a` wave bump · `k` image bump · `p` image on/off · `1`/`2` wave 1/2 · `f`/Esc fullscreen · `s` still capture · `[`/`]` erase −/+.
 
 **Trackpad (over the Output window):** unmodified gestures drive the feedback field, **Option** drives the image layer, **Shift** drives colour.
 

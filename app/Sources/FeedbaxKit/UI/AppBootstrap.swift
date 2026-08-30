@@ -56,6 +56,9 @@ public final class AppBootstrap {
     // Reproduces the original's webUI loadbang (spec §04 §1.1) — the exact vector every fresh
     // session actually starts from.
     engine.router.applyStartupDefaults(at: 0)
+    // `applyStartupDefaults` carries slots, layer axes and erase, but no toggles — so without
+    // this the image layer stays off through every GUI launch and the picker looks broken.
+    engine.applyColdStartImageDefaults()
 
     // The performer's own table wins over the bundled default (design §6.6); the same store
     // is what the operator panel writes pad reassignments through.
@@ -72,10 +75,10 @@ public final class AppBootstrap {
       sInvert: { engine.router.sInvert < 0 },
       worldBumpEnabled: { engine.bumpsEnabled.world },
       waveBumpEnabled: { engine.bumpsEnabled.wave },
-      kittyBumpEnabled: { engine.bumpsEnabled.kitty },
+      imageBumpEnabled: { engine.bumpsEnabled.image },
       wave1Enabled: { engine.waveforms.wave1Enabled },
       wave2Enabled: { engine.waveforms.wave2Enabled },
-      layerEnabled: { engine.sticker.layer.enabled },
+      imageEnabled: { engine.sticker.layer.enabled },
       // Relative trackpad gestures nudge from HERE (design §5), not from a private accumulator.
       rawValue: { engine.router.rawValue(for: $0) })
     let keyboard = KeyboardTrackpadSurface(bindings: bindings, stateSnapshot: stateSnapshot)

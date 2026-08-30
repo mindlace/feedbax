@@ -98,15 +98,14 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   // MARK: - Toggles (spec §04 §1's toggle table; queued exactly like a slot write)
 
   @Published public private(set) var sInvertOn = false
-  @Published public private(set) var layerOn = false
+  @Published public private(set) var imageShown = false
   @Published public private(set) var wave1On = true    // PresetToggles' own default (Presets.swift)
   @Published public private(set) var wave2On = true
   @Published public private(set) var worldBumpOn = false
   @Published public private(set) var waveBumpOn = false
-  @Published public private(set) var kittyBumpOn = false
+  @Published public private(set) var imageBumpOn = false
 
   public func setSInvert(_ on: Bool) { sInvertOn = on; pendingToggles.append(.sInvert(on)) }
-  public func setLayerEnabled(_ on: Bool) { layerOn = on; pendingToggles.append(.layerEnabled(on)) }
   public func setWave1Enabled(_ on: Bool) { wave1On = on; pendingToggles.append(.wave1Enabled(on)) }
   public func setWave2Enabled(_ on: Bool) { wave2On = on; pendingToggles.append(.wave2Enabled(on)) }
   public func setWorldBumpEnabled(_ on: Bool) {
@@ -115,8 +114,8 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   public func setWaveBumpEnabled(_ on: Bool) {
     waveBumpOn = on; pendingToggles.append(.waveBumpEnabled(on))
   }
-  public func setKittyBumpEnabled(_ on: Bool) {
-    kittyBumpOn = on; pendingToggles.append(.kittyBumpEnabled(on))
+  public func setImageBumpEnabled(_ on: Bool) {
+    imageBumpOn = on; pendingToggles.append(.imageBumpEnabled(on))
   }
 
   // MARK: - ControlSurface
@@ -176,8 +175,8 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     guard let engine else { return }
     let newSInvert = engine.router.sInvert < 0   // `sInvert` is ±1 — ControlRouter's own doc
     if sInvertOn != newSInvert { sInvertOn = newSInvert }
-    let newLayerOn = engine.sticker.layer.enabled  // sticker/movie lockstep — Engine.handle
-    if layerOn != newLayerOn { layerOn = newLayerOn }
+    let newImageShown = engine.isImageShown  // sticker/movie lockstep — Engine.handle
+    if imageShown != newImageShown { imageShown = newImageShown }
     let newWave1On = engine.waveforms.wave1Enabled
     if wave1On != newWave1On { wave1On = newWave1On }
     let newWave2On = engine.waveforms.wave2Enabled
@@ -186,8 +185,8 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     if worldBumpOn != newWorldBumpOn { worldBumpOn = newWorldBumpOn }
     let newWaveBumpOn = engine.bumpsEnabled.wave
     if waveBumpOn != newWaveBumpOn { waveBumpOn = newWaveBumpOn }
-    let newKittyBumpOn = engine.bumpsEnabled.kitty
-    if kittyBumpOn != newKittyBumpOn { kittyBumpOn = newKittyBumpOn }
+    let newImageBumpOn = engine.bumpsEnabled.image
+    if imageBumpOn != newImageBumpOn { imageBumpOn = newImageBumpOn }
     for axis in ControlAxis.live {
       let value = Double(engine.router.rawValue(for: axis))
       if axisValues[axis] != value { axisValues[axis] = value }
@@ -205,10 +204,10 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
       case .sInvert(let on): sInvertOn = on
       case .worldBumpEnabled(let on): worldBumpOn = on
       case .waveBumpEnabled(let on): waveBumpOn = on
-      case .kittyBumpEnabled(let on): kittyBumpOn = on
+      case .imageBumpEnabled(let on): imageBumpOn = on
       case .wave1Enabled(let on): wave1On = on
       case .wave2Enabled(let on): wave2On = on
-      case .layerEnabled(let on): layerOn = on
+      case .imageEnabled(let on): imageShown = on
       case .fullscreen, .stillCapture: break
       }
     }
@@ -241,18 +240,54 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
   @Published public private(set) var stickerIndex: Int = 0
   @Published public private(set) var stickerItemCount: Int = 0
 
+  /// Selecting an image is how the layer gets turned on (2026-08-29 design doc §3) — there is
+  /// no separate enable control for a performer to have left off.
   public func setStickerIndex(_ index: Int) {
     guard let sticker = engine?.sticker else { stickerIndex = index; return }
     sticker.selectedIndex = index
     stickerIndex = sticker.selectedIndex   // read back — `StickerSource` clamps
+    showSelectedImage()
+  }
+
+  /// The picker's `Off` tile, and the restore half of the `p` / gamepad-B gesture. Queue-only
+  /// — exactly like `setSInvert`/`setWave1Enabled`/etc above: the mirror updates immediately
+  /// (optimistic UI), but the write to `Engine` goes through `pendingToggles` and
+  /// `ControlRouter`'s last-write-wins arbitration on the next `poll()`/`tick()`, same as
+  /// every other toggle and same as the keyboard/gamepad surfaces. A direct `engine?...` call
+  /// here would apply out of band from that arbitration and could stomp — or be stomped by —
+  /// a keyboard/gamepad `.imageEnabled` write landing in the same frame.
+  public func hideImage() {
+    imageShown = false
+    pendingToggles.append(.imageEnabled(false))
+  }
+
+  public func showSelectedImage() {
+    guard (engine?.sticker.itemCount ?? 0) > 0 else { return }   // nothing to show
+    imageShown = true
+    pendingToggles.append(.imageEnabled(true))
+  }
+
+  /// The movie side's analogue of `showSelectedImage()` — called from `pickMovieFile` once a
+  /// movie has actually loaded. Deliberately a sibling rather than a shared method:
+  /// `showSelectedImage()`'s `itemCount > 0` guard is sticker-specific ("nothing to show" means
+  /// an empty sticker folder), and reusing it here would refuse to show a freshly loaded movie
+  /// in exactly the empty-sticker-folder case that finding 1 of the final review exists to fix.
+  /// A loaded movie is never "nothing to show", so this has no guard to mirror.
+  private func showLoadedMovie() {
+    imageShown = true
+    pendingToggles.append(.imageEnabled(true))
   }
 
   /// `0...1` → index, via `StickerSource.select(normalized:)`'s own mapping (spec §02 §2 item
   /// 4) — the panel's continuous slider, as distinct from `setStickerIndex`'s discrete stepper.
+  /// Also shows the newly selected image (2026-08-29 design doc §3) for the same reason
+  /// `setStickerIndex` does: this and the stepper address the same selection index, and the
+  /// single "selecting is showing" rule has to hold no matter which control moved it.
   public func setStickerNormalized(_ value: Double) {
     guard let sticker = engine?.sticker else { return }
     sticker.select(normalized: Float(value))
     stickerIndex = sticker.selectedIndex
+    showSelectedImage()
   }
 
   // MARK: - Sticker library (the panel's thumbnail grid, drop zone, and "Add Images…")
@@ -295,6 +330,7 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     stickerIndex = sticker.selectedIndex
     stickerItemCount = sticker.itemCount
     refreshStickerLibrary()
+    showSelectedImage()
     stickerImportMessage = Self.importMessage(for: result)
   }
 
@@ -372,8 +408,17 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     panel.canChooseDirectories = false
     panel.canChooseFiles = true
     guard panel.runModal() == .OK, let url = panel.url else { return }
+    applyChosenMovie(url)
+  }
+
+  /// Split out from `pickMovieFile` so the load-and-show behavior (final review, important
+  /// finding 1) is exercisable without driving a real `NSOpenPanel` — there is no headless way
+  /// to satisfy `runModal()`, but this piece has no AppKit dependency of its own. `internal`,
+  /// not `private`: `EngineViewModelTests` calls it directly via `@testable import`.
+  func applyChosenMovie(_ url: URL) {
     engine?.loadMovie(url: url)
     movieFileName = url.lastPathComponent
+    showLoadedMovie()
   }
 
   // MARK: - Resolution / frame rate (venue properties, not performed — `Preset` doc comment)
@@ -431,12 +476,12 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     stickerIndex = engine.sticker.selectedIndex
     stickerItemCount = engine.sticker.itemCount
     sInvertOn = preset.toggles.sInvert
-    layerOn = preset.toggles.layerEnabled
+    imageShown = preset.toggles.layerEnabled
     wave1On = preset.toggles.wave1
     wave2On = preset.toggles.wave2
     worldBumpOn = preset.toggles.worldBump
     waveBumpOn = preset.toggles.waveBump
-    kittyBumpOn = preset.toggles.kittyBump
+    imageBumpOn = preset.toggles.kittyBump
   }
 
   // MARK: - HUD
@@ -517,12 +562,12 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
       refreshStickerLibrary()
 
       sInvertOn = engine.router.sInvert < 0   // `sInvert` is ±1 (ControlRouter's own doc comment)
-      layerOn = engine.sticker.layer.enabled  // sticker/movie kept in lockstep (Engine.handle)
+      imageShown = engine.isImageShown  // sticker/movie kept in lockstep (Engine.handle)
       wave1On = engine.waveforms.wave1Enabled
       wave2On = engine.waveforms.wave2Enabled
       worldBumpOn = engine.bumpsEnabled.world
       waveBumpOn = engine.bumpsEnabled.wave
-      kittyBumpOn = engine.bumpsEnabled.kitty
+      imageBumpOn = engine.bumpsEnabled.image
     }
     if presetStore != nil { refreshPresetList() }
   }

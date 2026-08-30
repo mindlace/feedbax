@@ -36,29 +36,29 @@ final class EngineTests: XCTestCase {
   func testWorldBumpGateDefaultsOff() throws {
     let e = try Engine(context: try MetalContext())
     XCTAssertFalse(e.bumpsEnabled.world); XCTAssertFalse(e.bumpsEnabled.wave)
-    XCTAssertFalse(e.bumpsEnabled.kitty)   // spec §03 §7 — all three default OFF
+    XCTAssertFalse(e.bumpsEnabled.image)   // spec §03 §7 — all three default OFF
   }
 
-  /// Fix-review item 9a: the kitty offset (`step`'s stage 3) is an ADDITIVE, non-persistent
+  /// Fix-review item 9a: the image offset (`step`'s stage 3) is an ADDITIVE, non-persistent
   /// modulator contribution — it must not still be sitting on `sticker.transform` once `step`
   /// has returned. Injects real audio each frame (not silence) so the offset being asserted
   /// away is actually nonzero, not trivially zero either way.
-  func testKittyOffsetDoesNotAccumulate() throws {
+  func testImageOffsetDoesNotAccumulate() throws {
     let ctx = try MetalContext()
     let e = try Engine(context: ctx)
-    e.bumpsEnabled.kitty = true
+    e.bumpsEnabled.image = true
     let restTransform = e.sticker.transform
     for i in 0..<2 {
       // A fresh burst of the 46.7 Hz band every frame — `AudioBands.frameValues()` (called
       // inside `step`) resets the "since last frame" accumulator on every call, so without a
-      // fresh `ingest` here, the second frame's `kittyBumpRaw` would just be zero regardless
+      // fresh `ingest` here, the second frame's `imageBumpRaw` would just be zero regardless
       // of whether the restore this test is checking for is present.
       e.bands.ingest(sine(46.7, seconds: 0.05, sampleRate: 48000, amplitude: 0.8))
       let cb = ctx.queue.makeCommandBuffer()!
       _ = e.step(at: Double(i) / 60, commandBuffer: cb)
       cb.commit(); cb.waitUntilCompleted(); ctx.pool.endFrame()
       XCTAssertEqual(e.sticker.transform, restTransform,
-                     "frame \(i): kitty's additive offset must not persist past the step it was applied in")
+                     "frame \(i): image's additive offset must not persist past the step it was applied in")
     }
   }
 
@@ -106,6 +106,38 @@ final class EngineTests: XCTestCase {
     XCTAssertEqual(e.sticker.selectedIndex, 1, "sticker source selection restored")
   }
 
+  /// Final review, minor finding 6: a preset saved with the image off must recall off, and one
+  /// saved showing must recall showing — the round trip `testPresetRoundTripsLayerModeBumpsAnd
+  /// SourceSelection` above never touched. `layerEnabled` is the frozen `PresetToggles` field
+  /// this asserts against (2026-08-29 design doc §3): "an image is showing when one is
+  /// selected; selecting `Off` … is how it stops" has to survive a save/recall round trip, not
+  /// just a live toggle.
+  func testPresetRoundTripsImageEnabledState() throws {
+    let e = try Engine(context: try MetalContext())
+
+    e.hideImage()
+    let offPreset = e.capturePreset(name: "off")
+    XCTAssertFalse(offPreset.toggles.layerEnabled, "capturePreset records image-off")
+
+    e.showImage()
+    XCTAssertTrue(e.isImageShown, "sanity: showImage actually shows before we recall over it")
+    e.applyPreset(offPreset, at: 0)
+    XCTAssertFalse(e.isImageShown, "recalling an off preset hides the image")
+    XCTAssertFalse(e.sticker.layer.enabled)
+    XCTAssertFalse(e.movie.layer.enabled, "lockstep: movie follows sticker on recall too")
+
+    e.showImage()
+    let onPreset = e.capturePreset(name: "on")
+    XCTAssertTrue(onPreset.toggles.layerEnabled, "capturePreset records image-on")
+
+    e.hideImage()
+    XCTAssertFalse(e.isImageShown, "sanity: hideImage actually hides before we recall over it")
+    e.applyPreset(onPreset, at: 0)
+    XCTAssertTrue(e.isImageShown, "recalling an on preset shows the image")
+    XCTAssertTrue(e.sticker.layer.enabled)
+    XCTAssertTrue(e.movie.layer.enabled, "lockstep: movie follows sticker on recall too")
+  }
+
   /// Final review, finding 1: `Engine.init`'s new `stickerFolder` parameter is what lets
   /// `AppBootstrap.start()` point the sticker source at a real, resolvable location instead of
   /// the CWD-relative default a Finder-launched `Feedbax.app` (CWD `/`) can never see. This pins
@@ -117,5 +149,78 @@ final class EngineTests: XCTestCase {
 
     let e = try Engine(context: try MetalContext(), stickerFolder: tempFolder)
     XCTAssertEqual(e.sticker.itemCount, 1, "explicit stickerFolder must be scanned, not the CWD-relative default")
+  }
+
+  // MARK: - Cold-start image-layer enable
+
+  /// The image layer's `enabled` flag defaults to false (`LayerSettings`, matching Sean's build
+  /// — though the patch's own `pic enable` became `loadmess 1`, on at load, on 2026-08-29; spec
+  /// §04 §1.3 slot 0), and nothing in a GUI launch used to turn it on: not
+  /// `AppBootstrap.start()`, not `ControlRouter.applyStartupDefaults` (which carries slots and
+  /// axes but no toggles). So a performer with a folder full of stickers got a panel that
+  /// listed them, a picker that selected them, and an output that never showed one — the
+  /// selection was working the whole time with nothing drawn to see it with.
+  func testColdStartShowsAnImageAndArmsTheBumpWhenTheFolderHasImages() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data([0]).write(to: folder.appendingPathComponent("a.png"))
+
+    let e = try Engine(context: try MetalContext(), stickerFolder: folder)
+    XCTAssertFalse(e.sticker.layer.enabled)
+    XCTAssertFalse(e.bumpsEnabled.image)
+
+    e.applyColdStartImageDefaults()
+
+    XCTAssertTrue(e.sticker.layer.enabled, "a stocked folder means there is something to show")
+    XCTAssertTrue(e.movie.layer.enabled, "sticker/movie stay in lockstep")
+    XCTAssertTrue(e.bumpsEnabled.image, "the bump is armed with the image (design doc §4)")
+  }
+
+  func testColdStartDoesNothingWhenTheFolderIsEmpty() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+    let e = try Engine(context: try MetalContext(), stickerFolder: folder)
+    e.applyColdStartImageDefaults()
+
+    XCTAssertFalse(e.sticker.layer.enabled)
+    XCTAssertFalse(e.movie.layer.enabled)
+    XCTAssertFalse(e.bumpsEnabled.image, "nothing to bump")
+  }
+
+  func testColdStartNeverTurnsThingsOff() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+
+    let e = try Engine(context: try MetalContext(), stickerFolder: folder)
+    e.sticker.layer.enabled = true
+    e.bumpsEnabled.image = true
+    e.applyColdStartImageDefaults()   // empty folder, but both are already on
+
+    XCTAssertTrue(e.sticker.layer.enabled, "an empty folder must not switch an enabled layer off")
+    XCTAssertTrue(e.bumpsEnabled.image)
+  }
+
+  func testShowAndHideImageKeepTheSelectionAndTheLockstep() throws {
+    let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    try Data([0]).write(to: folder.appendingPathComponent("a.png"))
+    try Data([0]).write(to: folder.appendingPathComponent("b.png"))
+
+    let e = try Engine(context: try MetalContext(), stickerFolder: folder)
+    e.sticker.selectedIndex = 1
+    e.showImage()
+    XCTAssertTrue(e.isImageShown)
+
+    e.hideImage()
+
+    XCTAssertFalse(e.isImageShown)
+    XCTAssertFalse(e.movie.layer.enabled, "lockstep holds through hide")
+    XCTAssertEqual(e.sticker.selectedIndex, 1,
+                   "hiding must not disturb the selection — showing again brings back the same image")
+
+    e.showImage()
+    XCTAssertTrue(e.isImageShown)
+    XCTAssertEqual(e.sticker.selectedIndex, 1)
   }
 }

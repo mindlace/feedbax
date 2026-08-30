@@ -101,7 +101,7 @@ final class WaveformTests: XCTestCase {
     rp.colorAttachments[0].storeAction = .store
     let enc = cb.makeRenderCommandEncoder(descriptor: rp)!
 
-    let audio = FrameAudio(worldBump: 0, waveBumpRaw: 0.1, kittyBumpRaw: 0,
+    let audio = FrameAudio(worldBump: 0, waveBumpRaw: 0.1, imageBumpRaw: 0,
                            wave1Points: [Float](repeating: 0.2, count: 512),
                            wave2Points: [Float](repeating: 0, count: 1024))
     let proj = Compositor.projection(canvasAspect: 1)
@@ -145,7 +145,7 @@ final class WaveformTests: XCTestCase {
       rp.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
       rp.colorAttachments[0].storeAction = .store
       let enc = cb.makeRenderCommandEncoder(descriptor: rp)!
-      let audio = FrameAudio(worldBump: 0, waveBumpRaw: 0, kittyBumpRaw: 0,
+      let audio = FrameAudio(worldBump: 0, waveBumpRaw: 0, imageBumpRaw: 0,
                              wave1Points: wave1 ?? [Float](repeating: 0, count: 512),
                              wave2Points: wave2 ?? [Float](repeating: 0, count: 1024))
       renderer.draw(enc, frame: frame, audio: audio, projection: Compositor.projection(canvasAspect: 1))

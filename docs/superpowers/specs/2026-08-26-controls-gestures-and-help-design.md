@@ -1,5 +1,7 @@
 # Controls: trackpad gestures, XY pads, and a controls reference — design
 
+**Partly superseded (2026-08-29):** the "Surfaces at the top of the panel's right column" placement is replaced by a full-width pads band — see `2026-08-29-image-layer-and-panel-layout-design.md` §5.
+
 **Date:** 2026-08-26
 **Status:** implemented 2026-08-27 (plan: docs/superpowers/plans/2026-08-26-controls-gestures-and-help.md); pinch/twist directions pending the performer's run pass
 **Builds on:** `2026-08-23-feedbax-reimplementation-design.md` §5 (control surfaces),

@@ -59,138 +59,144 @@ public struct OperatorPanel: View {
     (.x, "IMAGE X"), (.y, "IMAGE Y"), (.scale, "IMAGE SCALE"), (.rotate, "IMAGE ROTATE"),
   ]
 
-  /// Two plain columns (the brief's own words) via `HStack`, not another `HSplitView` — the
-  /// draggable-divider split is reserved for the outer preview/panel layout in
-  /// `feedbax-dev/main.swift`; nesting a second one here would give the operator two resize
-  /// handles for what's conceptually one panel.
+  /// Pads on a full-width band above two balanced columns (2026-08-29 design doc §5.2). The XY
+  /// pads are the only control in this panel with a hard width floor: two 160pt squares plus
+  /// 16pt of spacing needs 336pt, against ~254pt of content width per column at a 600pt window,
+  /// which is why they used to clip in the old left/right `HStack` layout. A full-width band
+  /// fixes that and puts the most-performed control biggest and nearest to hand. This
+  /// deliberately supersedes the 2026-08-26 design doc's "Surfaces at the top of the right
+  /// column".
   public var body: some View {
-    HStack(alignment: .top, spacing: 12) {
+    VStack(alignment: .leading, spacing: 12) {
       Form {
-        Section("Shader Control") {
-          ForEach(Self.sliderLabels, id: \.0) { slot, label in
-            slider(label, slot: slot)
-          }
-          // TRANSPARANCY (sic — the original's spelling, spec §04 §1.4's erase-trail slider):
-          // NOT one of the 9 shadeCtl slots — a direct `ControlRouter.eraseControl` write
-          // (`EngineViewModel.setErase`'s own doc comment), so it isn't in `sliderLabels` above.
-          LabeledContent("TRANSPARANCY") {
-            HStack(spacing: 8) {
-              Slider(value: Binding(get: { vm.eraseValue }, set: { vm.setErase($0) }), in: 0...1)
-              Text(String(format: "%.2f", vm.eraseValue))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .trailing)
-            }
-          }
-        }
-        Section("Toggles") {
-          Toggle("SInvert", isOn: Binding(get: { vm.sInvertOn }, set: { vm.setSInvert($0) }))
-          Toggle("Layer Enable", isOn: Binding(get: { vm.layerOn }, set: { vm.setLayerEnabled($0) }))
-          Toggle("Wave 1", isOn: Binding(get: { vm.wave1On }, set: { vm.setWave1Enabled($0) }))
-          Toggle("Wave 2", isOn: Binding(get: { vm.wave2On }, set: { vm.setWave2Enabled($0) }))
-          Toggle("World Bump", isOn: Binding(get: { vm.worldBumpOn }, set: { vm.setWorldBumpEnabled($0) }))
-          Toggle("Wave Bump", isOn: Binding(get: { vm.waveBumpOn }, set: { vm.setWaveBumpEnabled($0) }))
-          // "kittieBump™" is the original's own on-screen label (spec §04 §1.3) — kept plain
-          // here since the brief's "use the original's names" instruction names the 6 slider
-          // labels specifically, not the toggle labels.
-          Toggle("Kitty Bump", isOn: Binding(get: { vm.kittyBumpOn }, set: { vm.setKittyBumpEnabled($0) }))
-        }
-        Section("Display") {
-          Toggle("Show HUD", isOn: $vm.hudEnabled)
-        }
-      }
-      .padding()
-      .frame(minWidth: 260, idealWidth: 300)
-
-      Form {
-        // The original's two Mira pads (spec §04 §1.2–1.3), each assignable to any two live
-        // axes; defaults come from the bindings table (design §7).
         Section("Surfaces") {
           HStack(alignment: .top, spacing: 16) {
             ForEach(Array(vm.bindings.pads.indices), id: \.self) { index in
-              padColumn(index)
-            }
+              padColumn(index)   // order stays left-to-right: ControlReference emits
+            }                    // "Pad 1 / Pad 2" from this same array order
+            Spacer(minLength: 0)
           }
-        }
-
-        Section("Layer Source") {
-          Picker("Mode", selection: Binding(get: { vm.layerMode }, set: { vm.setLayerMode($0) })) {
-            Text("Sticker").tag(LayerMode.sticker)
-            Text("Movie").tag(LayerMode.movie)
-          }
-          .pickerStyle(.segmented)
-
-          ForEach(Self.layerSliderLabels, id: \.0) { axis, label in
-            slider(label, axis: .layer(axis))
-          }
-
-          if vm.layerMode == .sticker {
-            // Drop zone + thumbnail grid. The stepper and slider below stay: they are what the
-            // keyboard/gamepad bindings drive, and the grid writes the same selection they do.
-            StickerPicker(vm: vm)
-            Stepper(
-              "Sticker \(vm.stickerIndex + 1) / \(max(vm.stickerItemCount, 1))",
-              value: Binding(get: { vm.stickerIndex }, set: { vm.setStickerIndex($0) }),
-              in: 0...max(vm.stickerItemCount - 1, 0)
-            )
-            Slider(
-              value: Binding(
-                get: { vm.stickerItemCount > 0 ? Double(vm.stickerIndex) / Double(vm.stickerItemCount) : 0 },
-                set: { vm.setStickerNormalized($0) }),
-              in: 0...1
-            )
-          } else {
-            Button(vm.movieFileName ?? "Choose Movie…") { vm.pickMovieFile() }
-            if let name = vm.movieFileName {
-              Text(name).foregroundStyle(.secondary)
-            }
-          }
-        }
-
-        Section("Venue") {
-          Picker("Resolution", selection: Binding(get: { vm.resolution }, set: { vm.setResolution($0) })) {
-            ForEach(Engine.resolutionPresets, id: \.self) { size in
-              Text("\(size.x)×\(size.y)").tag(size)
-            }
-          }
-          Picker("Frame Rate", selection: Binding(get: { vm.frameRate }, set: { vm.setFrameRate($0) })) {
-            ForEach(Engine.frameRatePresets, id: \.self) { rate in
-              Text("\(rate) fps").tag(rate)
-            }
-          }
-          Picker("Feedback sampling", selection: Binding(get: { vm.warpFilter }, set: { vm.setWarpFilter($0) })) {
-            Text("Nearest (parity)").tag(WarpFilter.nearest)
-            Text("Linear").tag(WarpFilter.linear)
-          }
-        }
-
-        Section("Presets") {
-          TextField("Preset name", text: $vm.presetName)
-            .focused($presetNameFieldFocused)
-            // Both Return and Escape just relinquish first responder — neither actually commits
-            // or reverts anything here: `$vm.presetName` has already been written character by
-            // character regardless of which key ends the edit (Escape does NOT restore whatever
-            // the field held before typing started), and saving the preset is still a separate,
-            // explicit "Save" button press. Both keys are just "done with this field" gestures.
-            // Without releasing focus on them, `f`/Escape's own fullscreen-toggle role and every
-            // other binding stay dead from Controls until the app relaunches (see this
-            // property's doc comment).
-            .onSubmit { presetNameFieldFocused = false }
-            .onExitCommand { presetNameFieldFocused = false }
-          Button("Save") { vm.saveCurrentPreset() }
-            .disabled(vm.presetName.isEmpty)
-          if vm.presetNames.isEmpty {
-            Text("No saved presets").foregroundStyle(.secondary)
-          } else {
-            ForEach(vm.presetNames, id: \.self) { name in
-              Button(name) { vm.recallPreset(named: name) }
-            }
-          }
-          Button("Refresh List") { vm.refreshPresetList() }
         }
       }
-      .padding()
-      .frame(minWidth: 260, idealWidth: 300)
+      .padding(.horizontal)
+
+      HStack(alignment: .top, spacing: 12) {
+        Form {
+          Section("Feedback") {
+            ForEach(Self.sliderLabels, id: \.0) { slot, label in
+              slider(label, slot: slot)
+            }
+            // TRANSPARANCY (sic — the original's spelling, spec §04 §1.4's erase-trail slider):
+            // NOT one of the 9 shadeCtl slots — a direct `ControlRouter.eraseControl` write
+            // (`EngineViewModel.setErase`'s own doc comment), so it isn't in `sliderLabels`
+            // above.
+            LabeledContent("TRANSPARANCY") {
+              HStack(spacing: 8) {
+                Slider(value: Binding(get: { vm.eraseValue }, set: { vm.setErase($0) }), in: 0...1)
+                Text(String(format: "%.2f", vm.eraseValue))
+                  .monospacedDigit()
+                  .foregroundStyle(.secondary)
+                  .frame(width: 44, alignment: .trailing)
+              }
+            }
+            Toggle("SInvert", isOn: Binding(get: { vm.sInvertOn }, set: { vm.setSInvert($0) }))
+            Toggle("World Bump", isOn: Binding(get: { vm.worldBumpOn }, set: { vm.setWorldBumpEnabled($0) }))
+          }
+
+          Section("Waveforms") {
+            Toggle("Wave 1", isOn: Binding(get: { vm.wave1On }, set: { vm.setWave1Enabled($0) }))
+            Toggle("Wave 2", isOn: Binding(get: { vm.wave2On }, set: { vm.setWave2Enabled($0) }))
+            // Wave Bump feeds wave 2's alpha, so it does nothing visible unless Wave 2 is on —
+            // which is the argument for it living here rather than with the other bumps.
+            Toggle("Wave Bump", isOn: Binding(get: { vm.waveBumpOn }, set: { vm.setWaveBumpEnabled($0) }))
+          }
+        }
+        .padding()
+        .frame(minWidth: 260, idealWidth: 320)
+
+        Form {
+          Section("Image") {
+            Picker("Mode", selection: Binding(get: { vm.layerMode }, set: { vm.setLayerMode($0) })) {
+              Text("Sticker").tag(LayerMode.sticker)
+              Text("Movie").tag(LayerMode.movie)
+            }
+            .pickerStyle(.segmented)
+
+            ForEach(Self.layerSliderLabels, id: \.0) { axis, label in
+              slider(label, axis: .layer(axis))
+            }
+            // The bump only ever offsets THIS layer's scale and Y, so it belongs here.
+            Toggle("Image Bump", isOn: Binding(get: { vm.imageBumpOn }, set: { vm.setImageBumpEnabled($0) }))
+
+            if vm.layerMode == .sticker {
+              // Drop zone + thumbnail grid. The stepper and slider below stay: they are what the
+              // keyboard/gamepad bindings drive, and the grid writes the same selection they do.
+              StickerPicker(vm: vm)
+              Stepper(
+                "Sticker \(vm.stickerIndex + 1) / \(max(vm.stickerItemCount, 1))",
+                value: Binding(get: { vm.stickerIndex }, set: { vm.setStickerIndex($0) }),
+                in: 0...max(vm.stickerItemCount - 1, 0)
+              )
+              Slider(
+                value: Binding(
+                  get: { vm.stickerItemCount > 0 ? Double(vm.stickerIndex) / Double(vm.stickerItemCount) : 0 },
+                  set: { vm.setStickerNormalized($0) }),
+                in: 0...1
+              )
+            } else {
+              Button(vm.movieFileName ?? "Choose Movie…") { vm.pickMovieFile() }
+              if let name = vm.movieFileName {
+                Text(name).foregroundStyle(.secondary)
+              }
+            }
+          }
+
+          Section("Venue & Presets") {
+            Picker("Resolution", selection: Binding(get: { vm.resolution }, set: { vm.setResolution($0) })) {
+              ForEach(Engine.resolutionPresets, id: \.self) { size in
+                Text("\(size.x)×\(size.y)").tag(size)
+              }
+            }
+            Picker("Frame Rate", selection: Binding(get: { vm.frameRate }, set: { vm.setFrameRate($0) })) {
+              ForEach(Engine.frameRatePresets, id: \.self) { rate in
+                Text("\(rate) fps").tag(rate)
+              }
+            }
+            Picker("Feedback sampling", selection: Binding(get: { vm.warpFilter }, set: { vm.setWarpFilter($0) })) {
+              Text("Nearest (parity)").tag(WarpFilter.nearest)
+              Text("Linear").tag(WarpFilter.linear)
+            }
+            // Not a ToggleEvent at all — it writes EngineHost directly — so it sits with the
+            // other venue properties rather than with the performed toggles.
+            Toggle("Show HUD", isOn: $vm.hudEnabled)
+
+            TextField("Preset name", text: $vm.presetName)
+              .focused($presetNameFieldFocused)
+              // Both Return and Escape just relinquish first responder — neither actually
+              // commits or reverts anything here: `$vm.presetName` has already been written
+              // character by character regardless of which key ends the edit (Escape does NOT
+              // restore whatever the field held before typing started), and saving the preset
+              // is still a separate, explicit "Save" button press. Both keys are just "done
+              // with this field" gestures. Without releasing focus on them, `f`/Escape's own
+              // fullscreen-toggle role and every other binding stay dead from Controls until
+              // the app relaunches (see `presetNameFieldFocused`'s doc comment).
+              .onSubmit { presetNameFieldFocused = false }
+              .onExitCommand { presetNameFieldFocused = false }
+            Button("Save") { vm.saveCurrentPreset() }
+              .disabled(vm.presetName.isEmpty)
+            if vm.presetNames.isEmpty {
+              Text("No saved presets").foregroundStyle(.secondary)
+            } else {
+              ForEach(vm.presetNames, id: \.self) { name in
+                Button(name) { vm.recallPreset(named: name) }
+              }
+            }
+            Button("Refresh List") { vm.refreshPresetList() }
+          }
+        }
+        .padding()
+        .frame(minWidth: 260, idealWidth: 320)
+      }
     }
   }
 

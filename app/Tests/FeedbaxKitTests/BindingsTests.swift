@@ -89,4 +89,15 @@ final class BindingsTests: XCTestCase {
     let text = String(data: try JSONEncoder().encode(row), encoding: .utf8)!
     XCTAssertTrue(text.contains(#""modifiers":["option","shift"]"#), text)
   }
+
+  /// The wire names are frozen even though the Swift names moved to "image bump"
+  /// (2026-08-29 design doc §4). `Bindings.toggleEvents(fromMarkers:)` THROWS on an unknown
+  /// marker and `BindingsStore.init` rethrows by design, so renaming a marker is not a
+  /// cosmetic change — it is a startup failure for anyone with a saved bindings file.
+  func testPersistedToggleMarkersAreFrozen() throws {
+    XCTAssertEqual(ToggleEvent.imageBumpEnabled(true).marker, "kittyBumpEnabled")
+    XCTAssertEqual(ToggleEvent.imageEnabled(true).marker, "layerEnabled")
+    XCTAssertEqual(ToggleEvent.fromMarker("kittyBumpEnabled", flip: true), .imageBumpEnabled(true))
+    XCTAssertEqual(ToggleEvent.fromMarker("layerEnabled", flip: true), .imageEnabled(true))
+  }
 }

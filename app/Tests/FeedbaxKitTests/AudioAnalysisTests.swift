@@ -85,8 +85,8 @@ final class AudioAnalysisTests: XCTestCase {
     buf.push(6)
     XCTAssertEqual(buf.points(), [0, 0, 1, 4], "mean of (2, 4, 6)")
   }
-  func testKittyReceiverRectifiesAndSlews() {
-    let r = KittyBumpReceiver()
+  func testImageReceiverRectifiesAndSlews() {
+    let r = ImageBumpReceiver()
     _ = r.process(-0.5)                       // abs() first
     let v = r.process(-0.5)
     XCTAssertGreaterThan(v, 0, "rectified"); XCTAssertLessThan(v, 0.5, "slewed by slide 22")

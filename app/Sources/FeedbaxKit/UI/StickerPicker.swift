@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The sticker half of the panel's "Layer Source" section: a drop zone that feeds the sticker
+/// The sticker half of the panel's "Image" section: a drop zone that feeds the sticker
 /// folder, and a thumbnail grid for picking among what's in it.
 ///
 /// This exists because flipping through images with only a stepper and a 0…1 slider means
@@ -11,11 +11,11 @@ import SwiftUI
 /// and a click here writes the same `selectedIndex` they do — no privileged path (design §5).
 ///
 /// The grid is collapsible and height-capped on purpose. The Controls window is already dense
-/// (Shader Control, Toggles, Display, Surfaces, Layer Source, Venue, Presets in two columns),
-/// so an uncapped grid of a folder with fifty stickers in it would push Venue and Presets off
-/// the bottom. Capped + internally scrolling + collapsible means a big folder costs a fixed
-/// amount of panel, and an operator who doesn't want the grid at all can fold it away and get
-/// the old compact layout back.
+/// (a full-width Surfaces band above a Feedback / Waveforms column and an Image / Venue &
+/// Presets column), so an uncapped grid of a folder with fifty stickers in it would push Venue
+/// & Presets off the bottom of the Image column. Capped + internally scrolling + collapsible
+/// means a big folder costs a fixed amount of panel, and an operator who doesn't want the grid
+/// at all can fold it away and get the old compact layout back.
 ///
 /// Like the rest of `OperatorPanel`, this view has no unit tests (there is no SwiftUI test rig
 /// in this package) — `EngineViewModel`/`StickerSource` carry the tested logic, and this is
@@ -29,14 +29,16 @@ struct StickerPicker: View {
 
   @State private var isTargeted = false
 
-  /// Small on purpose. A `Form` row on macOS only gets the trailing column, which in a
-  /// 600-pt-wide Controls window is ~140 pt — at 68 pt a tile the grid degenerates to one
-  /// image per row and scrolling it is no better than the stepper. 44 pt keeps two or three
-  /// per row at that width and simply fits more when the window is wider.
-  private static let tileSize: CGFloat = 44
-  /// ~3 rows of tiles — enough to read the set at a glance, short enough that Venue and
-  /// Presets stay on screen below.
-  private static let gridMaxHeight: CGFloat = 180
+  /// The image column is ~320pt wide now that the pads have their own band (2026-08-29 design
+  /// doc §5), so a `Form` row's control column fits roughly four 56pt tiles per row instead of
+  /// the two the old 44pt tiles managed at a 600pt window.
+  private static let tileSize: CGFloat = 56
+  /// ~3 rows. Venue & Presets still sits directly below Image in the same column, so the cap
+  /// still keeps a big folder from pushing it off the bottom — that hasn't changed. What's
+  /// different post-layout is just that there are two sections below the grid to protect
+  /// instead of three, and the cap is also about the grid not crowding the stepper and slider
+  /// directly beneath it.
+  private static let gridMaxHeight: CGFloat = 200
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -48,15 +50,12 @@ struct StickerPicker: View {
       }
       DisclosureGroup(isExpanded: $isExpanded) {
         gridBody
-        if let selected = vm.selectedStickerName {
-          Text(selected)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .help(selected)
-        }
+        Text(vm.imageShown ? (vm.selectedStickerName ?? "—") : "No image")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .frame(maxWidth: .infinity, alignment: .leading)
       } label: {
         Text("Images (\(vm.stickerNames.count))")
       }
@@ -120,6 +119,7 @@ struct StickerPicker: View {
           alignment: .leading,
           spacing: 6
         ) {
+          offTile
           ForEach(vm.stickerNames, id: \.self) { name in
             tile(name)
           }
@@ -131,8 +131,8 @@ struct StickerPicker: View {
   }
 
   private func tile(_ name: String) -> some View {
-    let isSelected = name == vm.selectedStickerName
-    // No per-tile filename: at 44 pt a caption truncates to "cir…ng", which tells the operator
+    let isSelected = vm.imageShown && name == vm.selectedStickerName
+    // No per-tile filename: at 56 pt a caption truncates to "cir…ng", which tells the operator
     // nothing. The name lives in the tooltip and in the selected-image line under the grid.
     return Button {
       vm.selectSticker(named: name)
@@ -161,5 +161,32 @@ struct StickerPicker: View {
     }
     .buttonStyle(.plain)
     .help(name)
+  }
+
+  /// The replacement for the old "Layer Enable" checkbox. It is a UI affordance, NOT an entry
+  /// in `StickerSource.items` — it shifts no index, `itemCount` does not count it, and the
+  /// stepper and normalized slider never reach it (2026-08-29 design doc §3.1). Those three
+  /// are the index space the keyboard and gamepad drive; a sentinel in them would offset every
+  /// selection a performer has memorised.
+  private var offTile: some View {
+    let isSelected = !vm.imageShown
+    return Button {
+      vm.hideImage()
+    } label: {
+      ZStack {
+        RoundedRectangle(cornerRadius: 4)
+          .fill(Color.secondary.opacity(0.08))
+        Image(systemName: "nosign")
+          .foregroundStyle(.secondary)
+      }
+      .frame(width: Self.tileSize, height: Self.tileSize)
+      .overlay(
+        RoundedRectangle(cornerRadius: 4)
+          .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.35),
+                        style: StrokeStyle(lineWidth: isSelected ? 2 : 1, dash: isSelected ? [] : [3, 2]))
+      )
+    }
+    .buttonStyle(.plain)
+    .help("Show no image")
   }
 }

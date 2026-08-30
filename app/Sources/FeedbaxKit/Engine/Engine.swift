@@ -47,7 +47,7 @@ public final class Engine {
   /// The webUI receiver half of the kittybump modulator (spec §04 §1.3) — `AudioBands`
   /// produces the raw, unrectified per-frame mean; this is the `abs` + `slide 22/14` that
   /// turns it into the offset actually applied to the sticker transform (step 3 of `step`).
-  private let kittyReceiver = KittyBumpReceiver()
+  private let imageBumpReceiver = ImageBumpReceiver()
 
   /// Per-layer filter chains (design §5's `TextureFilter`/`FilterChain`) — owned here, not on
   /// `SeedSource`, because no source implementation exposes one yet (`Presets.swift`'s note on
@@ -65,7 +65,7 @@ public final class Engine {
   /// All three audio-follower gates, default OFF (spec §03 §7/§10 — "Bump enables: all three
   /// default OFF"). Kept as one grouped tuple, not three separate properties, because they're
   /// always read/written together (preset capture/recall, the toggle handler below).
-  public var bumpsEnabled: (world: Bool, wave: Bool, kitty: Bool) = (false, false, false)
+  public var bumpsEnabled: (world: Bool, wave: Bool, image: Bool) = (false, false, false)
 
   /// Render tick rate — `FrameClock` (the display-link wrapper) reads this to pin its
   /// `preferredFrameRateRange`. Any of `frameRatePresets` in normal operation; not validated
@@ -219,20 +219,18 @@ public final class Engine {
     // 2b. Image-layer placement: the router's ramped `imageMove` (spec §02 §4; design §4)
     // lands on BOTH sources every frame. The original had one picsvid layer whose transform
     // came from `imageMove` whether it showed a picture or a video — the same reason
-    // `handle(.layerEnabled:)` keeps both `.enabled` flags in lockstep. This is the layer's
+    // `handle(.imageEnabled:)` keeps both `.enabled` flags in lockstep. This is the layer's
     // BASE placement; stage 3's kitty offset is additive on top and restored afterward.
     sticker.transform = router.layerTransform
     movie.transform = router.layerTransform
 
-    // 3. Kitty offset: an ADDITIVE, non-persistent modulator contribution on top of the
-    // sticker layer's manual transform (design §5's Modulator rule; spec §04 §1.3) — it
-    // never becomes the new manual value, so it must not accumulate frame over frame. The
-    // transform is mutated only for the duration of this frame's draw and restored below,
-    // rather than threading a separate "effective transform" through the compositor (which
-    // reads `SeedSource.transform` directly and has no such parameter).
+    // 3. Image bump ("kittieBump™" in the original — spec §04 §1.3, bus `kittybump`): an
+    // ADDITIVE, non-persistent modulator contribution on top of the sticker layer's manual
+    // transform (design §5's Modulator rule). It never becomes the new manual value, so it
+    // must not accumulate frame over frame.
     let baseStickerTransform = sticker.transform
-    if bumpsEnabled.kitty {
-      let offset = kittyReceiver.process(audio.kittyBumpRaw)
+    if bumpsEnabled.image {
+      let offset = imageBumpReceiver.process(audio.imageBumpRaw)
       sticker.transform.scale.x += offset
       sticker.transform.scale.y += offset
       sticker.transform.position.y += offset
@@ -294,6 +292,36 @@ public final class Engine {
     currentMoviePath = url.path
   }
 
+  /// Cold-start policy for the image layer, called once by `AppBootstrap.start()` right after
+  /// `ControlRouter.applyStartupDefaults` (which carries slots, axes and erase, but no
+  /// toggles). If the sticker folder actually has images in it, show one and arm the image
+  /// bump.
+  ///
+  /// This is the port catching up with the instrument, not diverging from it: `pic enable` was
+  /// `loadmess 0` in Sean's build, but the patch itself became `loadmess 1` — on at load — on
+  /// 2026-08-29, "so a loaded sticker is visible without an iPad" (spec §04 §1.3 slot 0). The
+  /// one difference is the stocked check, and it only bites where the patch's rule has nothing
+  /// to act on anyway: with no images there is no texture to draw.
+  ///
+  /// Asserts ON only, and only when stocked, so it can never revert a decision a preset or a
+  /// performer already made.
+  public func applyColdStartImageDefaults() {
+    guard sticker.itemCount > 0 else { return }
+    showImage()   // not a direct write — keeps sticker/movie in lockstep
+    bumpsEnabled.image = true
+  }
+
+  /// Whether an image is currently drawing. There is no separate switch for this any more —
+  /// it is what the picker's selection says (2026-08-29 design doc §3): choosing an image
+  /// shows it, choosing `Off` hides it, and an empty folder shows nothing.
+  public var isImageShown: Bool { sticker.layer.enabled }
+
+  /// Show the currently selected image. Hiding never disturbs `selectedIndex`, so this brings
+  /// back exactly the image that was showing before `hideImage()`.
+  public func showImage() { handle(.imageEnabled(true)) }
+
+  public func hideImage() { handle(.imageEnabled(false)) }
+
   // MARK: - Toggle routing (spec §01 §4's toggle table, minus `.sInvert` — `ControlRouter`
   // consumes that one itself and never forwards it here)
 
@@ -301,10 +329,10 @@ public final class Engine {
     switch event {
     case .worldBumpEnabled(let on): bumpsEnabled.world = on
     case .waveBumpEnabled(let on): bumpsEnabled.wave = on
-    case .kittyBumpEnabled(let on): bumpsEnabled.kitty = on
+    case .imageBumpEnabled(let on): bumpsEnabled.image = on
     case .wave1Enabled(let on): waveforms.wave1Enabled = on
     case .wave2Enabled(let on): waveforms.wave2Enabled = on
-    case .layerEnabled(let on):
+    case .imageEnabled(let on):
       // The original's "pic enable" toggle (spec §04 §1.4: default off, nothing draws until
       // turned on) — both sources share one flag rather than each tracking its own, because
       // only the ACTIVE one (`layerMode`) is ever ticked/drawn; the inactive one's flag is
@@ -351,10 +379,10 @@ public final class Engine {
     var preset = PresetStore.capture(name: name, router: router, layers: [sticker, movie])
     preset.toggles.worldBump = bumpsEnabled.world
     preset.toggles.waveBump = bumpsEnabled.wave
-    preset.toggles.kittyBump = bumpsEnabled.kitty
+    preset.toggles.kittyBump = bumpsEnabled.image
     preset.toggles.wave1 = waveforms.wave1Enabled
     preset.toggles.wave2 = waveforms.wave2Enabled
-    // Sticker/movie `.enabled` are kept in lockstep by `handle(.layerEnabled:)` above, so
+    // Sticker/movie `.enabled` are kept in lockstep by `handle(.imageEnabled:)` above, so
     // either one reads the same single logical flag.
     preset.toggles.layerEnabled = sticker.layer.enabled
     preset.layerMode = layerMode.presetIdentifier
@@ -379,11 +407,13 @@ public final class Engine {
     PresetStore.apply(preset, router: router, layers: [sticker, movie], at: time)
     layerMode = LayerMode.fromPresetIdentifier(preset.layerMode)
     bumpsEnabled = (world: preset.toggles.worldBump, wave: preset.toggles.waveBump,
-                    kitty: preset.toggles.kittyBump)
+                    image: preset.toggles.kittyBump)
     waveforms.wave1Enabled = preset.toggles.wave1
     waveforms.wave2Enabled = preset.toggles.wave2
-    sticker.layer.enabled = preset.toggles.layerEnabled
-    movie.layer.enabled = preset.toggles.layerEnabled
+    // Routed through `handle` (finding 7 of the final review) rather than writing both layers'
+    // `.enabled` directly, so the sticker/movie lockstep invariant is enforced by the one place
+    // that owns it instead of being re-proven by inspection at every call site.
+    handle(.imageEnabled(preset.toggles.layerEnabled))
     for layer in preset.layers {
       switch (layer.id, layer.sourceSelection) {
       case (sticker.id, .stickerIndex(let index)):

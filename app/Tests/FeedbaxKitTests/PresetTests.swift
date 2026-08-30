@@ -32,6 +32,38 @@ final class PresetTests: XCTestCase {
     XCTAssertEqual(store.list(), ["saturday"])
     XCTAssertEqual(try store.load(name: "saturday"), preset)
   }
+
+  /// Final review, minor finding 6: `testPresetRoundTripsThroughJSON` above encodes and decodes
+  /// through the SAME struct, so it stays green through a coordinated rename of a
+  /// `PresetToggles` field — it can't tell "the field is called `kittyBump`" from "whatever
+  /// `PresetToggles` calls its bump field round-trips." The bindings markers
+  /// (`"layerEnabled"`/`"kittyBumpEnabled"`) have a test guard for their frozen spelling; this
+  /// one, guarding `PresetToggles`' OWN frozen field names (2026-08-29 design doc §4's other
+  /// frozen name), did not. This decodes a hand-written JSON literal — standing in for a preset
+  /// file saved before this change — so it fails if `kittyBump` or `layerEnabled` is ever
+  /// renamed, independent of whatever `PresetToggles` currently encodes.
+  func testPresetTogglesDecodesPreExistingJSONWithFrozenFieldNames() throws {
+    let json = """
+    {
+      "sInvert": true,
+      "worldBump": false,
+      "waveBump": true,
+      "kittyBump": true,
+      "wave1": false,
+      "wave2": true,
+      "layerEnabled": true
+    }
+    """
+    let toggles = try JSONDecoder().decode(PresetToggles.self, from: Data(json.utf8))
+    XCTAssertTrue(toggles.sInvert)
+    XCTAssertFalse(toggles.worldBump)
+    XCTAssertTrue(toggles.waveBump)
+    XCTAssertTrue(toggles.kittyBump, "the frozen \"kittyBump\" key must still decode into kittyBump")
+    XCTAssertFalse(toggles.wave1)
+    XCTAssertTrue(toggles.wave2)
+    XCTAssertTrue(toggles.layerEnabled, "the frozen \"layerEnabled\" key must still decode into layerEnabled")
+  }
+
   /// Recall glides EVERYTHING now: the 9 slots through the slot ramps (as before) and the layer
   /// placement through the router's layer channel (design §4) — never by poking
   /// `layer.transform`, which `Engine.step` overwrites from `router.layerTransform` on the very
