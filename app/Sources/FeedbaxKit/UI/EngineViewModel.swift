@@ -1,6 +1,8 @@
 import Foundation
 import AppKit
+import ImageIO
 import QuartzCore
+import UniformTypeIdentifiers
 import simd
 
 /// The operator's SwiftUI-facing model (Task 20; design §5's `ControlSurface` section). The
@@ -253,6 +255,108 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
     stickerIndex = sticker.selectedIndex
   }
 
+  // MARK: - Sticker library (the panel's thumbnail grid, drop zone, and "Add Images…")
+
+  /// File names of everything in the sticker folder, index-aligned with `stickerIndex` — the
+  /// grid's model. Kept in step with the source by `onCountChanged` (see `init`), the same bus
+  /// the count mirror above rides.
+  @Published public private(set) var stickerNames: [String] = []
+
+  /// Small `NSImage` previews keyed by file name, decoded at grid size (never full res, and
+  /// never on the render path — this is `CGImageSourceCreateThumbnailAtIndex`, entirely
+  /// separate from `StickerSource`'s Metal decode of the *selected* image).
+  @Published public private(set) var stickerThumbnails: [String: NSImage] = [:]
+
+  /// Result of the last import, for the line under the drop zone ("Added 3 images", "Skipped
+  /// notes.txt"). A status line, deliberately not an alert: nothing here should throw a modal
+  /// in front of a performance.
+  @Published public private(set) var stickerImportMessage: String?
+
+  public var stickerFolder: URL? { engine?.sticker.folder }
+
+  public var selectedStickerName: String? {
+    guard stickerIndex >= 0, stickerIndex < stickerNames.count else { return nil }
+    return stickerNames[stickerIndex]
+  }
+
+  /// Grid click → the same `selectedIndex` write the stepper and the normalized slider make;
+  /// clicking a thumbnail is not a privileged path (design §5).
+  public func selectSticker(named name: String) {
+    guard let index = stickerNames.firstIndex(of: name) else { return }
+    setStickerIndex(index)
+  }
+
+  /// Drop-zone and file-picker entry point. Copies into the sticker folder and leaves the
+  /// first newly added image selected — see `StickerSource.importImages(from:)` for why copy
+  /// rather than reference.
+  public func importStickers(_ urls: [URL]) {
+    guard let sticker = engine?.sticker else { return }
+    let result = sticker.importImages(from: urls)
+    stickerIndex = sticker.selectedIndex
+    stickerItemCount = sticker.itemCount
+    refreshStickerLibrary()
+    stickerImportMessage = Self.importMessage(for: result)
+  }
+
+  /// The "Add Images…" button — `pickMovieFile`'s sibling, differing only in allowing several
+  /// files and in accepting a directory (dropping or choosing a whole folder of stickers is
+  /// the common case when setting up).
+  public func pickStickerFiles() {
+    let panel = NSOpenPanel()
+    panel.allowsMultipleSelection = true
+    panel.canChooseDirectories = true
+    panel.canChooseFiles = true
+    panel.allowedContentTypes = [.image]
+    guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+    importStickers(panel.urls)
+  }
+
+  /// Re-reads the name list from the source and fills in any thumbnail it doesn't have yet,
+  /// dropping the ones whose files are gone. Cheap on the common path: an existing thumbnail
+  /// is never re-decoded, so a rescan of a folder that only gained one file costs one decode.
+  public func refreshStickerLibrary() {
+    guard let sticker = engine?.sticker else { return }
+    let names = sticker.itemNames
+    stickerNames = names
+    let folder = sticker.folder
+    var thumbnails = stickerThumbnails.filter { names.contains($0.key) }
+    for name in names where thumbnails[name] == nil {
+      thumbnails[name] = Self.thumbnail(at: folder.appendingPathComponent(name))
+    }
+    stickerThumbnails = thumbnails
+  }
+
+  /// Grid-sized preview, or nil if the file isn't decodable (the tile then shows a placeholder
+  /// rather than vanishing — a file that's really there but unreadable is worth seeing).
+  private static func thumbnail(at url: URL, maxPixelSize: Int = 160) -> NSImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    let options: [CFString: Any] = [
+      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailWithTransform: true,
+      kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+    ]
+    guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
+      return nil
+    }
+    return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+  }
+
+  private static func importMessage(for result: StickerSource.ImportResult) -> String? {
+    if result.isEmpty { return nil }
+    var parts: [String] = []
+    if !result.imported.isEmpty {
+      parts.append(result.imported.count == 1
+        ? "Added \(result.imported[0])"
+        : "Added \(result.imported.count) images")
+    }
+    if !result.skipped.isEmpty {
+      parts.append(result.skipped.count == 1
+        ? "skipped \(result.skipped[0])"
+        : "skipped \(result.skipped.count) files")
+    }
+    return parts.joined(separator: " · ")
+  }
+
   // MARK: - Movie (NSOpenPanel file picker)
 
   @Published public private(set) var movieFileName: String?
@@ -406,7 +510,11 @@ public final class EngineViewModel: ObservableObject, ControlSurface {
       frameRate = engine.frameRate
       stickerIndex = engine.sticker.selectedIndex
       stickerItemCount = engine.sticker.itemCount
-      engine.sticker.onCountChanged = { [weak self] count in self?.stickerItemCount = count }
+      engine.sticker.onCountChanged = { [weak self] count in
+        self?.stickerItemCount = count
+        self?.refreshStickerLibrary()   // names + thumbnails follow the count, one bus
+      }
+      refreshStickerLibrary()
 
       sInvertOn = engine.router.sInvert < 0   // `sInvert` is ±1 (ControlRouter's own doc comment)
       layerOn = engine.sticker.layer.enabled  // sticker/movie kept in lockstep (Engine.handle)

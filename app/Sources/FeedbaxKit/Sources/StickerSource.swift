@@ -42,7 +42,12 @@ public final class StickerSource: SeedSource {
     ["png", "gif", "tif", "tiff", "bmp", "jpg", "jpeg", "heic"]
 
   private let context: MetalContext
-  private let folder: URL
+
+  /// The scanned folder. Public because the operator panel needs it to build thumbnail URLs
+  /// and to name the drop target on screen — read-only; the only way to put a file in it from
+  /// the UI is `importImages(from:)`.
+  public let folder: URL
+
   private var cachedTexture: MTLTexture?
 
   /// Sorted by filename (spec §02 §2's folder listing order — deterministic, not directory
@@ -54,6 +59,10 @@ public final class StickerSource: SeedSource {
   public var onCountChanged: ((Int) -> Void)?
 
   public var itemCount: Int { items.count }
+
+  /// Display names for `items`, in the same order — what the panel's thumbnail grid labels
+  /// each tile with, so the UI never has to reason about `URL`s it doesn't own.
+  public var itemNames: [String] { items.map(\.lastPathComponent) }
 
   private var _selectedIndex = 0
 
@@ -114,9 +123,105 @@ public final class StickerSource: SeedSource {
   /// Uses `force: true` — see `setSelectedIndex(_:force:)` — so a rescan always re-decodes
   /// index 0 even when the index number didn't change.
   public func rescan() {
+    rescan(selecting: nil)
+  }
+
+  /// `rescan()` with a say in where selection lands: `nil` keeps the reset-to-first rule
+  /// above, a file name lands on that file if it survived the rescan (and falls back to index
+  /// 0 if it didn't). Only `importImages(from:)` passes a name — dropping a sticker on the
+  /// panel should put *that* sticker on screen, not silently jump to whatever sorts first.
+  public func rescan(selecting fileName: String?) {
     scan()
-    setSelectedIndex(0, force: true)
+    let target = fileName.flatMap { name in items.firstIndex { $0.lastPathComponent == name } } ?? 0
+    setSelectedIndex(target, force: true)
     onCountChanged?(itemCount)
+  }
+
+  /// What `importImages(from:)` did, in file names: `imported` are now in the folder (under
+  /// the names they landed with, which may be suffixed — see below), `skipped` are the ones
+  /// that were not images this source can decode, or that failed to copy.
+  public struct ImportResult: Equatable {
+    public let imported: [String]
+    public let skipped: [String]
+    public var isEmpty: Bool { imported.isEmpty && skipped.isEmpty }
+  }
+
+  /// Copies dropped/chosen files into `folder` and rescans — the operator's way to get images
+  /// in front of the instrument without leaving it (spec §02 §9 describes a `dropfile` "drop a
+  /// folder here!" affordance in the original patch that was never actually wired to anything;
+  /// this is that affordance, wired).
+  ///
+  /// Copy rather than reference-in-place, deliberately: `folder` stays the single answer to
+  /// "what can this instrument show," so the list survives a relaunch and stays the seam the
+  /// design's later jukebox queue feeds. Three rules fall out of that:
+  /// - A directory contributes the images directly inside it (not recursively) — a dropped
+  ///   folder is a set of stickers, not a tree to crawl.
+  /// - A name that already exists in the folder gets a `-2`/`-3` suffix rather than
+  ///   overwriting; the resident file may be one the performer has been using all night.
+  /// - A file that is ALREADY in `folder` is selected, not re-copied, so dragging a sticker
+  ///   out of the very folder being scanned doesn't breed duplicates of itself.
+  ///
+  /// Non-throwing: a mixed drop (some images, a `.txt`, an unreadable file) should import
+  /// what it can and *report* the rest, never abandon the good files or raise a modal
+  /// mid-performance. Everything not imported comes back in `skipped` for the panel to show.
+  @discardableResult
+  public func importImages(from urls: [URL]) -> ImportResult {
+    var imported: [String] = []
+    var skipped: [String] = []
+
+    for url in expand(urls) {
+      guard Self.imageExtensions.contains(url.pathExtension.lowercased()) else {
+        skipped.append(url.lastPathComponent)
+        continue
+      }
+      if url.deletingLastPathComponent().standardizedFileURL == folder.standardizedFileURL {
+        imported.append(url.lastPathComponent)   // already home — select it, don't clone it
+        continue
+      }
+      do {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let destination = availableDestination(for: url.lastPathComponent)
+        try FileManager.default.copyItem(at: url, to: destination)
+        imported.append(destination.lastPathComponent)
+      } catch {
+        skipped.append(url.lastPathComponent)
+      }
+    }
+
+    // Nothing landed → don't touch selection at all. A rejected drop must not yank the
+    // performer off the sticker they were showing (which a bare `rescan()` would, by resetting
+    // to index 0).
+    if !imported.isEmpty { rescan(selecting: imported.first) }
+    return ImportResult(imported: imported, skipped: skipped)
+  }
+
+  /// Directories contribute their immediate children (sorted, so a dropped folder imports in
+  /// the same order it will later scan in); everything else passes through untouched.
+  private func expand(_ urls: [URL]) -> [URL] {
+    urls.flatMap { url -> [URL] in
+      var isDirectory: ObjCBool = false
+      guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
+            isDirectory.boolValue else { return [url] }
+      let children = (try? FileManager.default.contentsOfDirectory(
+        at: url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+      return children
+        .filter { Self.imageExtensions.contains($0.pathExtension.lowercased()) }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+  }
+
+  /// `sticker.png` → `sticker.png`, or `sticker-2.png`, `sticker-3.png`… — the first name in
+  /// that series not already taken on disk.
+  private func availableDestination(for fileName: String) -> URL {
+    let candidate = folder.appendingPathComponent(fileName)
+    guard FileManager.default.fileExists(atPath: candidate.path) else { return candidate }
+    let base = candidate.deletingPathExtension().lastPathComponent
+    let ext = candidate.pathExtension
+    for suffix in 2... {
+      let next = folder.appendingPathComponent("\(base)-\(suffix)").appendingPathExtension(ext)
+      if !FileManager.default.fileExists(atPath: next.path) { return next }
+    }
+    return candidate   // unreachable: the loop above is unbounded
   }
 
   /// Cached-texture read only — see the type doc's decode-on-selection rule. A missing or

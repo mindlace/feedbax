@@ -125,6 +125,9 @@ public struct OperatorPanel: View {
           }
 
           if vm.layerMode == .sticker {
+            // Drop zone + thumbnail grid. The stepper and slider below stay: they are what the
+            // keyboard/gamepad bindings drive, and the grid writes the same selection they do.
+            StickerPicker(vm: vm)
             Stepper(
               "Sticker \(vm.stickerIndex + 1) / \(max(vm.stickerItemCount, 1))",
               value: Binding(get: { vm.stickerIndex }, set: { vm.setStickerIndex($0) }),
