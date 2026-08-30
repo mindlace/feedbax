@@ -48,15 +48,12 @@ struct StickerPicker: View {
       }
       DisclosureGroup(isExpanded: $isExpanded) {
         gridBody
-        if let selected = vm.selectedStickerName {
-          Text(selected)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .help(selected)
-        }
+        Text(vm.imageShown ? (vm.selectedStickerName ?? "—") : "No image")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+          .truncationMode(.middle)
+          .frame(maxWidth: .infinity, alignment: .leading)
       } label: {
         Text("Images (\(vm.stickerNames.count))")
       }
@@ -120,6 +117,7 @@ struct StickerPicker: View {
           alignment: .leading,
           spacing: 6
         ) {
+          offTile
           ForEach(vm.stickerNames, id: \.self) { name in
             tile(name)
           }
@@ -131,7 +129,7 @@ struct StickerPicker: View {
   }
 
   private func tile(_ name: String) -> some View {
-    let isSelected = name == vm.selectedStickerName
+    let isSelected = vm.imageShown && name == vm.selectedStickerName
     // No per-tile filename: at 44 pt a caption truncates to "cir…ng", which tells the operator
     // nothing. The name lives in the tooltip and in the selected-image line under the grid.
     return Button {
@@ -161,5 +159,32 @@ struct StickerPicker: View {
     }
     .buttonStyle(.plain)
     .help(name)
+  }
+
+  /// The replacement for the old "Layer Enable" checkbox. It is a UI affordance, NOT an entry
+  /// in `StickerSource.items` — it shifts no index, `itemCount` does not count it, and the
+  /// stepper and normalized slider never reach it (2026-08-29 design doc §3.1). Those three
+  /// are the index space the keyboard and gamepad drive; a sentinel in them would offset every
+  /// selection a performer has memorised.
+  private var offTile: some View {
+    let isSelected = !vm.imageShown
+    return Button {
+      vm.hideImage()
+    } label: {
+      ZStack {
+        RoundedRectangle(cornerRadius: 4)
+          .fill(Color.secondary.opacity(0.08))
+        Image(systemName: "nosign")
+          .foregroundStyle(.secondary)
+      }
+      .frame(width: Self.tileSize, height: Self.tileSize)
+      .overlay(
+        RoundedRectangle(cornerRadius: 4)
+          .strokeBorder(isSelected ? Color.accentColor : Color.secondary.opacity(0.35),
+                        style: StrokeStyle(lineWidth: isSelected ? 2 : 1, dash: isSelected ? [] : [3, 2]))
+      )
+    }
+    .buttonStyle(.plain)
+    .help("Show no image")
   }
 }
