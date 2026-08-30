@@ -56,6 +56,10 @@ public final class AppBootstrap {
     // Reproduces the original's webUI loadbang (spec §04 §1.1) — the exact vector every fresh
     // session actually starts from.
     engine.router.applyStartupDefaults(at: 0)
+    // `applyStartupDefaults` carries slots, layer axes and erase, but no toggles — so without
+    // this the image layer stayed off through every GUI launch and the sticker picker looked
+    // broken (see `Engine.enableImageLayerIfStocked`).
+    engine.enableImageLayerIfStocked()
 
     // The performer's own table wins over the bundled default (design §6.6); the same store
     // is what the operator panel writes pad reassignments through.

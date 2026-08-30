@@ -294,6 +294,29 @@ public final class Engine {
     currentMoviePath = url.path
   }
 
+  /// Cold-start policy for the image layer: if the sticker folder actually has images in it,
+  /// turn the layer on. Called once by `AppBootstrap.start()`, right after
+  /// `ControlRouter.applyStartupDefaults`.
+  ///
+  /// This is the port catching up with the instrument, not diverging from it: `pic enable` was
+  /// `loadmess 0` in Sean's build, but the patch itself was changed to `loadmess 1` — **on at
+  /// load** — on 2026-08-29, "so a loaded sticker is visible without an iPad" (spec §04 §1.3,
+  /// slot 0, and the §1.4 control table). The Swift side kept the old off-at-load behaviour,
+  /// which meant a folder full of stickers, a picker that selected them, and an output that
+  /// never showed one.
+  ///
+  /// The one difference from the patch's unconditional `loadmess 1` is the stocked check, and
+  /// it only bites where the patch's rule has nothing to act on anyway: with an empty folder
+  /// there is no texture to draw, so asserting the flag would buy a layer that renders nothing
+  /// and a toggle that lies about it.
+  ///
+  /// Asserts ON only, and only when stocked: an empty folder leaves the flag alone rather than
+  /// forcing it off, so this can never revert a decision a preset or a performer already made.
+  public func enableImageLayerIfStocked() {
+    guard sticker.itemCount > 0 else { return }
+    handle(.layerEnabled(true))   // not a direct write — keeps sticker/movie in lockstep
+  }
+
   // MARK: - Toggle routing (spec §01 §4's toggle table, minus `.sInvert` — `ControlRouter`
   // consumes that one itself and never forwards it here)
 
