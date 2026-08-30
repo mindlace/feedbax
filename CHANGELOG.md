@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.124.0](https://github.com/mindlace/feedbax/compare/v0.123.2...v0.124.0) (2026-08-30)
+
+
+### Features
+
+* **ui:** an image layer without a switch, and a panel that fits ([#20](https://github.com/mindlace/feedbax/issues/20)) ([638e9e6](https://github.com/mindlace/feedbax/commit/638e9e6d25f266162166595e0ebb541cdd88171b))
+* **ui:** drop zone and thumbnail grid for the sticker folder ([#19](https://github.com/mindlace/feedbax/issues/19)) ([00ca448](https://github.com/mindlace/feedbax/commit/00ca448b681cb23b4d04145f358846a98f6cb0f9))
+
+
+### Bug Fixes
+
+* **engine:** stamp the seed layer over the feedback plane instead of injecting it under ([#18](https://github.com/mindlace/feedbax/issues/18)) ([92eb1ec](https://github.com/mindlace/feedbax/commit/92eb1ec1d247c1f724e812a25c649a3ab244dcfd))
+* **picsvid:** draw the sticker above the feedback plane so it no longer saturates to white ([#17](https://github.com/mindlace/feedbax/issues/17)) ([a058c25](https://github.com/mindlace/feedbax/commit/a058c2582667437df4693822f5c846e326f2ea71))
+* **picsvid:** make stickers actually appear on Max 9 ([#15](https://github.com/mindlace/feedbax/issues/15)) ([e5c2fa6](https://github.com/mindlace/feedbax/commit/e5c2fa629bfbf03b734943da1efd403dda0cd876))
+
 ## [0.123.2](https://github.com/mindlace/feedbax/compare/v0.123.1...v0.123.2) (2026-08-29)
 
 
